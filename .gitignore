@@ -1,3 +1,14 @@
+.calva/output-window/
+.calva/repl.calva-repl
+.classpath
+.clj-kondo/.cache
+.lsp/.cache
+.lsp/sqlite.db
+.nrepl-history
+.nrepl-port
+.portal/vs-code.edn
+.project
+.socket-repl-port
 pom.xml
 pom.xml.asc
 *.jar
