@@ -2,33 +2,48 @@
 
 ## Project Structure & Module Organization
 - `src/aimee/` contains the library code.
-- `src/aimee/chat/` implements the chat-completions flow: `client.clj` (entry point), `executor.clj` (HTTP), `parser.clj` (SSE chunk parsing), `emitter.clj` (channel delivery), `timeout.clj` (idle timeout), and `events.clj` (event shapes).
-- Low-level SSE parsing is in `src/aimee/sse_parser.clj` and `src/aimee/sse.clj`.
-- Simulators and load helpers live in `src/aimee/*simulator*.clj` and `src/aimee/stress.clj` and are excluded from the build artifact.
-- No `test/` directory is present yet.
+- `src/aimee/chat/` contains the chat-completions pipeline:
+  - `client.clj` request entrypoint/lifecycle
+  - `executor.clj` HTTP execution
+  - `options.clj` defaults and validation
+  - `sse.clj` stream handler wiring
+  - `parser.clj` payload parsing/accumulation
+  - `emitter.clj` channel emission and backpressure
+  - `timeout.clj` idle-timeout behavior
+  - `events.clj` event constructors
+- Low-level SSE framing/parsing is in `src/aimee/sse.clj` and `src/aimee/sse_parser.clj`.
+- REPL/dev helpers are in `src/aimee/simulator.clj`, `src/aimee/stress.clj`, and `src/aimee/scheduler_simulator.clj`.
+- No `test/` source set is used for standalone test execution at this stage.
 
-## Build, Test, and Development Commands
-- `clojure -T:build jar` builds the library JAR into `target/` (see `build.clj`).
-- `clojure -T:build deploy` builds and deploys to Clojars (requires credentials).
-- `clojure -M:nrepl` starts a REPL with nREPL on port `7888` (see `deps.edn`).
-- There is no test alias configured yet.
+## Build, REPL, and Development Commands
+- `clojure -T:build jar` builds the library JAR into `target/`.
+- `clojure -T:build deploy` builds and deploys to Clojars (credentials required).
+- `clojure -M:nrepl` starts nREPL on port `7888`.
+- Quick load check for core namespaces:
+  - `clojure -M -e "(require 'aimee.chat.client 'aimee.sse 'aimee.scheduler)"`
+
+## Testing Workflow (Current)
+- There is intentionally no standalone automated test command yet.
+- Validation is REPL-first through executable `(comment ...)` blocks in source files.
+- Primary verification namespaces:
+  - `src/aimee/simulator.clj`
+  - `src/aimee/stress.clj`
+  - `src/aimee/scheduler_simulator.clj`
+- If automated tests are introduced later, favor minimal suites that do not constrain active code shaping.
 
 ## Coding Style & Naming Conventions
-- Clojure source uses standard formatting and 2-space indentation.
-- Use kebab-case for namespaces and functions (exception: `src/aimee/sse_helpers.clj`).
-- Private helpers should be prefixed with `-`.
-- Prefer explicit names for state and channels (e.g., `stop?`, `stream-ref`, `terminated?`).
-- Caller-owned channels are passed in via `:channel`; this library only writes events and closes channels on completion/error.
-
-## Testing Guidelines
-- Tests are not yet present. If you add them, prefer `clojure.test` in `test/` with `*-test.clj` file names.
-- Focus tests on event emission (`:chunk`, `:complete`, `:error`) and backpressure behavior in `emitter.clj`.
-
-## Commit & Pull Request Guidelines
-- Commit history is minimal and does not show a strict convention. Use clear, imperative subjects (e.g., "Add SSE timeout handling").
-- PRs should include a short summary, testing notes (even if "not run"), and linked issues when applicable.
+- Use standard Clojure formatting and 2-space indentation.
+- Use kebab-case for namespaces/functions (file-level underscore exception: `src/aimee/sse_helpers.clj`).
+- Prefer explicit state names (`stop?`, `stream-ref`, `terminated?`, `last-progress`).
+- Caller-owned channels are passed via `:channel`; this library writes events and closes channel on terminal events.
 
 ## Architecture Notes
-- Core flow: `start-request!` → `executor/*` HTTP request → SSE consumption → parse → emit to channel.
-- Event payloads are maps with `:event` and `:data`. Streaming chunks may include `:parsed` when `:parse-chunks?` is true.
-- Backpressure is handled by `:overflow-mode` (`:block` or `:queue`) and `:overflow-max`.
+- Core flow: `start-request!` -> `executor` -> SSE consume/parse -> emit channel events.
+- Event shape is always `{ :event <keyword> :data <payload> }`.
+- Backpressure controls: `:overflow-mode` (`:queue` or `:block`) and `:overflow-max`.
+- Timeout control: `:channel-idle-timeout-ms` emits `:complete` with `:reason :timeout` when delivery stalls.
+
+## Documentation
+- `docs/overview.md`: high-level map and workflow.
+- `docs/api.md`: options and event contract.
+- `docs/architecture.md`: runtime flow and subsystem behavior.

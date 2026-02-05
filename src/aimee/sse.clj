@@ -136,8 +136,10 @@
             (if-let [ex (:error read-result)]
               (do
                 (error! ex)
-                {:content acc
-                 :reason :error})
+                (let [info (build-complete-info acc nil :error)]
+                  {:content (:content info)
+                   :finish-reason (:finish-reason info)
+                   :reason :error}))
               (let [line (:line read-result)
                     last-lines (update-last-lines last-lines line)
                     parsed (parser/parse-line line)

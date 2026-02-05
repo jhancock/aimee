@@ -38,9 +38,19 @@ Add to your deps.edn:
 
 ## Docs
 
-- `docs/aimee-streaming-spec.md`
-- `docs/aimee-improvements.md`
-- `docs/aimee-responses-spec.md`
+- `docs/overview.md`
+- `docs/api.md`
+- `docs/architecture.md`
+
+## Validation
+
+There is intentionally no standalone automated test command yet.
+
+Validation is REPL-first via executable `(comment ...)` blocks in:
+
+- `src/aimee/simulator.clj`
+- `src/aimee/stress.clj`
+- `src/aimee/scheduler_simulator.clj`
 
 ## Build
 

@@ -90,9 +90,7 @@
   Refusal text is normalized into :content when content is blank.
   "
   [body]
-  (let [payload (try
-                  (json/parse-string body true)
-                  (catch Exception _ nil))
+  (let [payload (json/parse-string body true)
         refusal (get-in payload [:choices 0 :message :refusal])
         refusal? (when (and (string? refusal) (not (str/blank? refusal))) true)
         content (get-in payload [:choices 0 :message :content] "")

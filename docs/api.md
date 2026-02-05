@@ -1,177 +1,129 @@
 # API Reference
 
-## Main Entry Point
+## Entry point
 
-### `aimee.chat.client/start-request!`
+`aimee.chat.client/start-request!`
 
 ```clojure
 (start-request! opts)
 ```
 
-Start a chat completion request.
-
-**Required Options:**
-
-| Key | Type | Description |
-|-----|------|-------------|
-| `:channel` | `core.async/channel` | Caller-created channel for events |
-| `:url` | string | OpenAI-compatible API endpoint |
-| `:api-key` | string | API bearer token |
-| `:model` | string | Model identifier (e.g., `"gpt-4o-mini"`) |
-| `:messages` | vector | Chat messages `[{:role "user" :content "..."}]` |
-
-**Optional Options:**
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `:stream?` | `false` | Enable SSE streaming |
-| `:parse-chunks?` | `true` | Include `:parsed` key in `:chunk` events |
-| `:accumulate?` | `true` | Build `:content` in `:complete` event |
-| `:on-parse-error` | `:stop` | `:stop` to error, `:continue` to skip bad chunks |
-| `:overflow-max` | `10000` | Max queued events before overflow |
-| `:overflow-mode` | `:queue` | `:queue` buffers, `:block` applies backpressure |
-| `:channel-idle-timeout-ms` | `nil` | Abort if no progress for N ms |
-| `:http-timeout-ms` | `nil` | HTTP request timeout |
-| `:headers` | `nil` | Additional HTTP headers |
-| `:include-usage?` | `false` | Request usage stats in streaming mode |
-
-**Returns:** `{:stop! fn}` - Call `(stop!)` to cancel the request.
-
----
-
-## Channel Events
-
-Events are emitted to the provided channel as maps with `:event` and `:data` keys.
-
-### `:chunk` Event
+Starts one chat completion request and returns:
 
 ```clojure
-{:event :chunk
- :data {:id "..."
-        :type "..."
-        :data "{...}"  ; Raw JSON string
-        :parsed {...}} ; When :parse-chunks? is true
+{:stop! (fn [])}
 ```
 
-The `:parsed` map (when `:parse-chunks?` is true):
+Calling `:stop!` requests termination and closes the active stream if present.
+
+## Required options
+
+- `:channel` caller-created `core.async` channel
+- `:url` OpenAI-compatible chat completions endpoint
+- `:api-key` bearer token
+- `:model` model id string
+- `:messages` non-empty sequence of chat messages
+
+## Optional options
+
+- `:stream?` default `false`
+- `:parse-chunks?` default `true`
+- `:accumulate?` default `true`
+- `:on-parse-error` `:stop` (default) or `:continue`
+- `:overflow-max` default `10000`
+- `:overflow-mode` `:queue` (default) or `:block`
+- `:channel-idle-timeout-ms` default `nil`
+- `:http-timeout-ms` default `nil`
+- `:headers` default `nil`
+- `:include-usage?` default `false` (streaming requests)
+- `:choices-n` fixed to `1` (validated)
+
+## Event contract
+
+Events are pushed to `:channel` as:
 
 ```clojure
-{:content "..."            ; Delta content
- :role "assistant"         ; When present
- :tool-calls [...]         ; When present
- :function-call {...}      ; When present
- :finish-reason "stop"     ; When present
- :usage {...}              ; When present
- :done? false              ; True for terminal chunk
- :refusal "..."            ; When refusal present
- :refusal? true}           ; True if refusal occurred
+{:event <keyword>
+ :data  <payload>}
 ```
 
-### `:complete` Event
+### `:chunk`
+
+`(:data event)` is the raw parsed SSE event map:
 
 ```clojure
-{:event :complete
- :data {:content "..."        ; Accumulated content (when :accumulate?)
-        :finish-reason "stop"
-        :role "assistant"
-        :tool-calls [...]
-        :function-call {...}
-        :usage {...}
-        :refusal "..."
-        :refusal? true
-        :reason :done          ; :done, :stopped, :timeout, :error
-        :done-event {...}}}    ; Original [DONE] event
+{:id "..."
+ :type "..."
+ :data "{...json...}"
+ :parsed {...}} ; present when :parse-chunks? true
 ```
 
-### `:error` Event
+`(:parsed (:data event))` may include:
+
+- `:content`
+- `:role`
+- `:tool-calls`
+- `:function-call`
+- `:finish-reason`
+- `:usage`
+- `:refusal`
+- `:refusal?`
+- `:done?`
+- `:skip?`
+
+### `:complete`
+
+`(:data event)` includes at least:
 
 ```clojure
-{:event :error
- :data <Exception or ex-info>}
+{:content "..."}
 ```
 
----
+It may also include:
 
-## Streaming Behavior Options
+- `:finish-reason`
+- `:role`
+- `:tool-calls`
+- `:function-call`
+- `:usage`
+- `:refusal`
+- `:refusal?`
+- `:done-event`
+- `:reason` (`:stopped`, `:timeout`, `:eof`, `:error`)
 
-### `:parse-chunks?` (default: `true`)
+### `:error`
 
-When `true`, each `:chunk` event includes a `:parsed` key with structured data extracted from the SSE payload.
+`(:data event)` is an exception (`ex-info` for structured cases).
 
-When `false`, chunks contain only raw SSE data (`:id`, `:type`, `data`) without parsing. Useful for raw proxying.
+## Streaming behavior notes
 
-### `:accumulate?` (default: `true`)
+- `:parse-chunks? false` keeps chunk payloads raw (no `:parsed`).
+- `:accumulate? false` disables content accumulation in `:complete`.
+- `:on-parse-error :stop` emits `:error` and closes.
+- `:on-parse-error :continue` logs and skips malformed chunks.
 
-When `true`, the `:complete` event includes `:content` built from accumulated chunks.
+## Backpressure behavior
 
-When `false`, `:content` is empty but metadata (`:finish-reason`, `:role`, etc.) is still captured.
+- `:overflow-mode :queue` lazily creates a bounded overflow queue (`:overflow-max`).
+- `:overflow-mode :block` immediately blocks producer writes on full channel.
 
-### `:on-parse-error` (default: `:stop`)
+## Idle timeout behavior
 
-- `:stop` - Emit `:error` event and close stream on parse failure
-- `:continue` - Log warning and skip malformed chunks
+When `:channel-idle-timeout-ms` is set, timeout checks run periodically. If no progress is emitted to the channel within the window:
 
----
+- a `:complete` event is emitted with `{:reason :timeout}`
+- the stream is stopped/closed
 
-## Backpressure Handling
+## Non-streaming behavior
 
-### `:overflow-max` (default: `10000`)
+For `:stream? false`, a single HTTP response is parsed and emitted as `:complete`, or `:error` for non-2xx.
 
-Maximum number of events that can be queued when the consumer is slow.
+## Helper namespace
 
-### `:overflow-mode` (default: `:queue`)
+`aimee.sse-helpers`
 
-- `:queue` - Create an in-memory overflow queue when channel is full. Events are drained by a background thread.
-- `:block` - Block immediately when channel is full, applying direct backpressure to the producer.
+- `format-sse-data`
+- `format-sse-done`
+- `event->simplified-sse`
 
----
-
-## Timeout Options
-
-### `:channel-idle-timeout-ms`
-
-Aborts the request if no events are successfully emitted to the channel for the specified duration. Note that enqueuing into the overflow buffer does **not** count as progress.
-
-### `:http-timeout-ms`
-
-HTTP request timeout in milliseconds. Passes through to the underlying HTTP client.
-
----
-
-## Event Constructors
-
-### `aimee.chat.events/make-event`
-
-```clojure
-(make-event kind payload)
-```
-
-Create a consistent event map. `kind` is `:complete`, `:error`, `:chunk`, or a custom keyword.
-
----
-
-## SSE Helpers
-
-### `aimee.sse-helpers/format-sse-data`
-
-```clojure
-(format-sse-data payload)
-```
-
-Return an SSE data frame with a JSON payload for browser clients.
-
-### `aimee.sse-helpers/format-sse-done`
-
-```clojure
-(format-sse-done)
-```
-
-Return an SSE data frame signaling stream completion (`data: [DONE]\n\n`).
-
-### `aimee.sse-helpers/event->simplified-sse`
-
-```clojure
-(event->simplified-sse item)
-```
-
-Convert a channel stream event into a simplified SSE data frame. Returns `nil` for empty content or errors.
+These are utility functions for adapting channel events to browser-friendly SSE output.

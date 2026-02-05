@@ -41,13 +41,19 @@
 
         ;; Channel full, queue mode - create overflow queue
         :else
-        (let [q (java.util.concurrent.LinkedBlockingQueue. overflow-max)]
-          (log/warn "overflow queue created"
-                    {:overflow-max overflow-max})
-          (reset! queue q)
-          (start-drain! q)
-          (.put q {:event event :close? close?})
-          true)))))
+        (let [new-q (java.util.concurrent.LinkedBlockingQueue. overflow-max)]
+          (if (compare-and-set! queue nil new-q)
+            (do
+              (log/warn "overflow queue created"
+                        {:overflow-max overflow-max})
+              (start-drain! new-q)
+              (.put new-q {:event event :close? close?})
+              true)
+            (do
+              ;; Another thread won queue initialization; route to that queue.
+              (.put ^java.util.concurrent.LinkedBlockingQueue @queue
+                    {:event event :close? close?})
+              true)))))))
 
 (defn make-emitter
   "Create an emitter for delivering event maps to a channel."
