@@ -1,11 +1,15 @@
 {:paths ["src"]
  :deps
- {org.clojure/clojure {:mvn/version "1.11.2"}
+ {org.clojure/clojure {:mvn/version "1.12.4"}
   org.clojure/core.async {:mvn/version "1.9.829-alpha2"}
   org.clojure/tools.logging {:mvn/version "1.3.0"}
-  cheshire/cheshire {:mvn/version "5.13.0"}
-  org.babashka/http-client {:mvn/version "0.4.22"}}
+  cheshire/cheshire {:mvn/version "6.1.0"}
+  org.babashka/http-client {:mvn/version "0.4.23"}}
  :aliases
- {:build {:deps {io.github.clojure/tools.build {:mvn/version "0.9.6"}
-                 io.github.slipset/deps-deploy {:mvn/version "0.2.1"}}
-          :ns-default build}}}
+ {:build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.12"}
+                 io.github.slipset/deps-deploy {:mvn/version "0.2.2"}}
+          :ns-default build}
+  :nrepl {:extra-paths ["test"]
+              :extra-deps {nrepl/nrepl {:mvn/version "1.6.0-alpha2"}}
+              :jvm-opts ["-Djdk.attach.allowAttachSelf"]
+              :main-opts ["-m" "nrepl.cmdline" "--port" "7888"]}}}
