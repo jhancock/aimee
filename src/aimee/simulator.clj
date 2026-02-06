@@ -66,14 +66,42 @@
       (recur))))
 
 (comment
-  ;; REPL helper (uses parker.config for convenience)
-  (require '[parker.config :as config])
-  (config/openai-url)
+  ;; Network helper for API-backed examples
+  (def openai-url (or (System/getenv "OPENAI_URL")
+                      "https://api.openai.com/v1/chat/completions"))
+  (def openai-key (System/getenv "OPENAI_API_KEY"))
+  openai-key
+  ;; Optional local override:
+  ;; (require '[parker.config :as config])
+  ;; (def openai-url (config/openai-url))
+  ;; (def openai-key (config/openai-key))
+
+  ;; Wait for the terminal event (:complete or :error) from a channel.
+  (defn await-terminal-event!! [ch timeout-ms]
+    (loop [deadline (+ (System/currentTimeMillis) timeout-ms)]
+      (let [remaining (- deadline (System/currentTimeMillis))]
+        (when (pos? remaining)
+          (let [[event port] (async/alts!! [ch (async/timeout remaining)])]
+            (cond
+              (not= port ch)
+              nil
+
+              (nil? event)
+              nil
+
+              (#{:complete :error} (:event event))
+              event
+
+              :else
+              (recur deadline)))))))
 
   ;; Local helpers for SSE-only tests (no network)
   (require '[aimee.sse :as sse]
            '[aimee.chat.sse :as chat-sse]
-           '[aimee.chat.parser :as chat-parser])
+           '[aimee.chat.parser :as chat-parser]
+           '[aimee.chat.options :as chat-options]
+           '[aimee.chat.emitter :as chat-emitter]
+           '[aimee.stress :as stress])
 
   ;; Example 0: Local channel smoke test (no network)
   (def local-ch (async/chan 3))
@@ -89,23 +117,46 @@
   @local-chunks
   @local-complete
 
+  ;; Example 0a: Auth resolution and validation (no network)
+  ;; Priority: :api-key > :api-key-fn > :api-key-env; Authorization header also valid.
+  (def auth-base
+    {:channel (async/chan 1)
+     :url openai-url
+     :model "gpt-4o-mini"
+     :messages [{:role "user" :content "auth check"}]})
+  (chat-options/validate-opts! (assoc auth-base :api-key openai-key))
+  (chat-options/validate-opts! (assoc auth-base :api-key-fn (fn [_opts] openai-key)))
+  (chat-options/validate-opts! (assoc auth-base :api-key-env "OPENAI_API_KEY"))
+  (chat-options/validate-opts!
+   (assoc auth-base :api-key nil :headers {"Authorization" (str "Bearer " openai-key)}))
+  ;; Runtime check using :api-key-fn
+  (def ch-auth (async/chan 1))
+  (chat/start-request!
+   {:url openai-url
+    :api-key-fn (fn [_opts] openai-key)
+    :channel ch-auth
+    :model "gpt-4o-mini"
+    :stream? false
+    :messages [{:role "user" :content "Say auth fn works."}]})
+  (def event-auth (async/<!! ch-auth))
+  event-auth
+
   ;; Example 1: Non-streaming call via chat client
   (def ch-1 (async/chan 1))
   (chat/start-request!
-   {:url (config/openai-url)
-    :api-key (config/openai-key)
+   {:url openai-url
+    :api-key openai-key
     :channel ch-1
     :model "gpt-4o-mini"
     :stream? false
     :messages [{:role "user" :content "Count to 5."}]})
   (def event-1 (async/<!! ch-1))
   event-1
-  (:data event-1)
 
   ;; Example 2: Standard streaming with :parsed chunks and accumulation (default)
   (def stream-2
-    (start! {:url (config/openai-url)
-             :api-key (config/openai-key)
+    (start! {:url openai-url
+             :api-key openai-key
              :stream? true
              :model "gpt-4o-mini"
              :messages [{:role "user" :content "Say hello in two sentences."}]}))
@@ -117,18 +168,18 @@
         (do
           (log/info "chunk event:" event)
           (log/info "chunk parsed:" (:parsed (:data event)))
-          (log/info "simplified:" (helpers/event->simplified-sse event))
+          (log/info "simplified SSE:" (helpers/event->simplified-sse event))
           (recur))
 
         :complete
         (do
-          (log/info "complete:" event)
-          (log/info "simplified:" (helpers/event->simplified-sse event)))
+          (log/info "complete event:" event)
+          (log/info "simplified SSE:" (helpers/event->simplified-sse event)))
 
         :error
         (do
           (log/error "error event:" event)
-          (log/info "simplified:" (helpers/event->simplified-sse event)))
+          (log/info "simplified SSE:" (helpers/event->simplified-sse event)))
 
         (do
           (log/warn "unknown event:" event)
@@ -136,8 +187,8 @@
 
   ;; Example 2b: Streaming with usage included (:include-usage? true)
   (def stream-2b
-    (start! {:url (config/openai-url)
-             :api-key (config/openai-key)
+    (start! {:url openai-url
+             :api-key openai-key
              :stream? true
              :include-usage? true
              :model "gpt-4o-mini"
@@ -154,8 +205,8 @@
   ;; Example 3: Raw SSE proxy mode (no parsing, no accumulation)
   ;; Use this when forwarding chunks directly to a browser
   (def stream-3
-    (start! {:url (config/openai-url)
-             :api-key (config/openai-key)
+    (start! {:url openai-url
+             :api-key openai-key
              :stream? true
              :parse-chunks? false
              :accumulate? false
@@ -173,8 +224,8 @@
   ;; Example 4: Parsed chunks without accumulation
   ;; Get deltas via :parsed but don't build content
   (def stream-4
-    (start! {:url (config/openai-url)
-             :api-key (config/openai-key)
+    (start! {:url openai-url
+             :api-key openai-key
              :stream? true
              :accumulate? false
              :model "gpt-4o-mini"
@@ -262,6 +313,108 @@
     :on-error (:on-error refusal-handlers)})
   @refusal-final
 
+  ;; Example 5d: Parse error policy (:stop) with malformed JSON (local SSE)
+  ;; In this local fixture, :stop emits :error; [DONE] still ends the stream.
+  (def sse-bad-stop
+    (str
+     "data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"A\"}}]}\n\n"
+     "data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"BROKEN\"}}\n\n"
+     "data: [DONE]\n\n"))
+  (def input-bad-stop (java.io.ByteArrayInputStream. (.getBytes sse-bad-stop "UTF-8")))
+  (def bad-stop-events (atom []))
+  (def bad-stop-complete (atom nil))
+  (def handlers-bad-stop
+    (chat-sse/make-stream-handlers
+     {:emit! (fn [event _] (swap! bad-stop-events conj event))
+      :complete! (fn [info] (reset! bad-stop-complete info))
+      :error! (fn [ex] (swap! bad-stop-events conj {:event :error :data ex}))
+      :stream nil
+      :parse-chunks? true
+      :on-parse-error :stop}))
+  (sse/consume-sse!
+   input-bad-stop
+   {:accumulator chat-parser/accumulate-content
+    :initial-acc {:content ""}
+    :on-event (:on-event handlers-bad-stop)
+    :on-complete (:on-complete handlers-bad-stop)
+    :on-error (:on-error handlers-bad-stop)})
+  @bad-stop-events
+  @bad-stop-complete
+
+  ;; Example 5e: Parse error policy (:continue) with malformed JSON (local SSE)
+  ;; The malformed chunk should be skipped and stream should still complete.
+  (def sse-bad-continue
+    (str
+     "data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"A\"}}]}\n\n"
+     "data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"BROKEN\"}}\n\n"
+     "data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"B\"}}]}\n\n"
+     "data: [DONE]\n\n"))
+  (def input-bad-continue (java.io.ByteArrayInputStream. (.getBytes sse-bad-continue "UTF-8")))
+  (def bad-continue-events (atom []))
+  (def bad-continue-complete (atom nil))
+  (def handlers-bad-continue
+    (chat-sse/make-stream-handlers
+     {:emit! (fn [event _] (swap! bad-continue-events conj event))
+      :complete! (fn [info] (reset! bad-continue-complete info))
+      :error! (fn [ex] (swap! bad-continue-events conj {:event :error :data ex}))
+      :stream nil
+      :parse-chunks? true
+      :on-parse-error :continue}))
+  (sse/consume-sse!
+   input-bad-continue
+   {:accumulator chat-parser/accumulate-content
+    :initial-acc {:content ""}
+    :on-event (:on-event handlers-bad-continue)
+    :on-complete (:on-complete handlers-bad-continue)
+    :on-error (:on-error handlers-bad-continue)})
+  @bad-continue-events
+  @bad-continue-complete
+
+  ;; Example 5f: Starter backpressure demo (local SSE)
+  ;; :queue mode should keep stream alive while consumer lags.
+  (def overflow-starter
+    (stress/run-overflow-test! {:chunks 300
+                                :overflow-max 50
+                                :overflow-mode :queue
+                                :buffer-size 1
+                                :consumer-delay-ms 5}))
+  (Thread/sleep 1000)
+  @(:consumed overflow-starter)
+  @(:terminated overflow-starter)
+  ;; :block mode applies immediate backpressure and should terminate cleanly.
+  (def overflow-block-starter
+    (stress/run-overflow-test! {:chunks 150
+                                :overflow-mode :block
+                                :buffer-size 1
+                                :consumer-delay-ms 5}))
+  (Thread/sleep 1000)
+  @(:consumed overflow-block-starter)
+  @(:terminated overflow-block-starter)
+
+  ;; Example 5g: Channel lifecycle guarantee on :complete (local, no network)
+  ;; Terminal event is delivered, then channel closes.
+  (def lifecycle-ch-complete (async/chan 1))
+  (def lifecycle-cb-complete
+    (chat-emitter/make-channel-callbacks
+     lifecycle-ch-complete
+     {:overflow-max 10 :overflow-mode :queue}))
+  ((:complete! lifecycle-cb-complete) {:content "done"})
+  (def lifecycle-complete-event (async/<!! lifecycle-ch-complete))
+  lifecycle-complete-event
+  (async/<!! lifecycle-ch-complete)
+
+  ;; Example 5h: Channel lifecycle guarantee on :error (local, no network)
+  ;; Terminal error is delivered, then channel closes.
+  (def lifecycle-ch-error (async/chan 1))
+  (def lifecycle-cb-error
+    (chat-emitter/make-channel-callbacks
+     lifecycle-ch-error
+     {:overflow-max 10 :overflow-mode :queue}))
+  ((:error! lifecycle-cb-error) (ex-info "simulated failure" {:type :simulated}))
+  (def lifecycle-error-event (async/<!! lifecycle-ch-error))
+  lifecycle-error-event
+  (async/<!! lifecycle-ch-error)
+
   ;; Example 6: HTTP error flow (non-2xx response)
   (def ch-6 (async/chan 1))
   (chat/start-request!
@@ -272,60 +425,73 @@
     :stream? false
     :messages [{:role "user" :content "This will not succeed."}]})
   (def event-6 (async/<!! ch-6))
-  event-6 
+  event-6
   (:data event-6)
 
-  ;; Example 7: Idle-timeout with delayed consumer
+  ;; Example 7: Idle-timeout after initial progress (deterministic timeout)
+  ;; Read one early chunk, then stop consuming to force channel stall and timeout.
   (def ch-7 (async/chan 1))
   (def result-7 (chat/start-request!
-                 {:url (config/openai-url)
-                  :api-key (config/openai-key)
+                 {:url openai-url
+                  :api-key openai-key
                   :channel ch-7
                   :model "gpt-4o-mini"
                   :stream? true
                   :channel-idle-timeout-ms 1500
-                  :messages [{:role "user" :content "Stream for a while."}]}))
-  (Thread/sleep 3000)
-  (def event-7 (async/<!! ch-7))
+                  :messages [{:role "user"
+                              :content "Write 1200 words about a library cat."}]}))
+  (def first-7 (async/<!! ch-7))
+  (:event first-7)
+  (def event-7
+    (if (#{:complete :error} (:event first-7))
+      first-7
+      (do
+        (Thread/sleep 2500)
+        (await-terminal-event!! ch-7 10000))))
   event-7
   (:data event-7)
 
-  ;; Example 7b: Idle-timeout without consuming (confirm timeout event)
-  (def ch-7b (async/chan 1))
+  ;; Example 7b: Idle-timeout without consuming (confirm terminal :timeout)
+  ;; Use an unbuffered channel so no consumer means zero progress from the start.
+  ;; After timeout elapses, first terminal read should be {:reason :timeout}.
+  (def ch-7b (async/chan))
   (def result-7b (chat/start-request!
-                  {:url (config/openai-url)
-                   :api-key (config/openai-key)
+                  {:url openai-url
+                   :api-key openai-key
                    :channel ch-7b
                    :model "gpt-4o-mini"
                    :stream? true
                    :channel-idle-timeout-ms 1500
-                   :messages [{:role "user" :content "Keep streaming until timeout."}]}))
-  (Thread/sleep 3000)
-  (def event-7b (async/<!! ch-7b))
+                   :messages [{:role "user"
+                               :content "Write 1200 words about a library cat."}]}))
+  (Thread/sleep 2500)
+  (def event-7b (await-terminal-event!! ch-7b 10000))
   event-7b
   (:data event-7b)
 
-  ;; Example 8: Stop a streaming request and confirm :stopped
-  ;; This should emit a :complete event with {:reason :stopped}.
+  ;; Example 8: Stop a streaming request and confirm :stopped (deterministic)
+  ;; Use a long prompt and wait for the terminal event after stop.
   (def ch-8 (async/chan 1))
   (def result-8 (chat/start-request!
-                 {:url (config/openai-url)
-                  :api-key (config/openai-key)
+                 {:url openai-url
+                  :api-key openai-key
                   :channel ch-8
                   :model "gpt-4o-mini"
                   :stream? true
-                  :messages [{:role "user" :content "Stream slowly and keep going."}]}))
-  (Thread/sleep 200)
+                  :messages [{:role "user"
+                              :content "Write 1200 words about a library cat."}]}))
+  (Thread/sleep 100)
   ((:stop! result-8))
-  (def event-8 (async/<!! ch-8))
+  (def event-8 (await-terminal-event!! ch-8 10000))
+  event-8
   (:data event-8)
 
   ;; Example 9: Force idle-timeout by blocking the consumer
   ;; The channel fills immediately, so no progress is recorded and timeout fires.
   (def ch-9 (async/chan 1))
   (def result-9 (chat/start-request!
-                 {:url (config/openai-url)
-                  :api-key (config/openai-key)
+                 {:url openai-url
+                  :api-key openai-key
                   :channel ch-9
                   :model "gpt-4o-mini"
                   :stream? true
@@ -336,6 +502,23 @@
   (def event-9 (async/<!! ch-9))
   event-9
   (:data event-9)
+
+  ;; Example 9b: No-timeout contrast (:channel-idle-timeout-ms nil)
+  ;; Even with delayed consumption, terminal event should be normal completion, not :timeout.
+  (def ch-9b (async/chan 1))
+  (def result-9b (chat/start-request!
+                  {:url openai-url
+                   :api-key openai-key
+                   :channel ch-9b
+                   :model "gpt-4o-mini"
+                   :stream? true
+                   :channel-idle-timeout-ms nil
+                   :messages [{:role "user"
+                               :content "Write 600 words about a library cat."}]}))
+  (Thread/sleep 2000)
+  (def event-9b (await-terminal-event!! ch-9b 30000))
+  event-9b
+  (:data event-9b)
 
   ;; For more stress scenarios, see aimee.stress
   )

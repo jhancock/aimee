@@ -30,6 +30,8 @@
    ;; Note: enqueuing into the overflow buffer does not count as progress.
    :http-timeout-ms nil
    ;; HTTP request timeout (ms). Nil means no explicit timeout set.
+   :api-key-env "OPENAI_API_KEY"
+   ;; Environment variable used to resolve :api-key when not provided directly.
    :headers nil
    ;; Additional HTTP headers to merge into the request.
    :include-usage? false
@@ -42,9 +44,54 @@
   [value]
   (and (string? value) (not (str/blank? value))))
 
+(defn- auth-header-value
+  [headers]
+  (some #(get headers %)
+        ["Authorization" "authorization" :Authorization :authorization]))
+
+(defn- has-auth-header?
+  [headers]
+  (non-blank-string? (auth-header-value headers)))
+
+(defn- call-api-key-fn
+  [api-key-fn opts]
+  (try
+    (api-key-fn opts)
+    (catch clojure.lang.ArityException _
+      (api-key-fn))))
+
+(defn- resolve-api-key
+  [{:keys [api-key api-key-fn api-key-env] :as opts}]
+  (let [opts (if (non-blank-string? api-key)
+               opts
+               (dissoc opts :api-key))
+        resolved (or (when (non-blank-string? api-key)
+                       api-key)
+                     (when (ifn? api-key-fn)
+                       (let [value (call-api-key-fn api-key-fn opts)]
+                         (when (non-blank-string? value)
+                           value)))
+                     (let [env-name (or api-key-env "OPENAI_API_KEY")
+                           value (System/getenv env-name)]
+                       (when (non-blank-string? value)
+                         value)))]
+    (cond-> opts
+      resolved (assoc :api-key resolved))))
+
+(defn- validate-auth!
+  [{:keys [api-key headers] :as opts}]
+  (when-not (or (non-blank-string? api-key)
+                (has-auth-header? headers))
+    (throw (ex-info "Missing API credentials"
+                    {:type :missing-api-credentials
+                     :hint "Provide :api-key, :api-key-fn, or Authorization header"})))
+  opts)
+
 (s/def ::channel (s/and some? #(satisfies? async-proto/Channel %)))
 (s/def ::url non-blank-string?)
 (s/def ::api-key non-blank-string?)
+(s/def ::api-key-fn ifn?)
+(s/def ::api-key-env non-blank-string?)
 (s/def ::model non-blank-string?)
 (s/def ::messages (s/and sequential? seq))
 (s/def ::stream? boolean?)
@@ -62,8 +109,11 @@
 (s/def ::choices-n #{1})
 
 (s/def ::opts
-  (s/keys :req-un [::channel ::url ::api-key ::model ::messages]
+  (s/keys :req-un [::channel ::url ::model ::messages]
           :opt-un [::stream?
+                   ::api-key
+                   ::api-key-fn
+                   ::api-key-env
                    ::parse-chunks?
                    ::accumulate?
                    ::on-parse-error
@@ -81,9 +131,10 @@
   Returns normalized options map with all defaults applied.
   "
   [opts]
-  (let [opts (merge (defaults) opts)]
+  (let [opts (-> (merge (defaults) opts)
+                 (resolve-api-key))]
     (when-not (s/valid? ::opts opts)
       (throw (ex-info "Invalid chat options"
                       {:type :invalid-chat-options
                        :errors (s/explain-data ::opts opts)})))
-    opts))
+    (validate-auth! opts)))

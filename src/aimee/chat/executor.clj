@@ -3,7 +3,12 @@
             [aimee.chat.sse :as chat-sse]
             [aimee.http :as http]
             [aimee.sse :as sse]
-            [cheshire.core :as json]))
+            [cheshire.core :as json]
+            [clojure.string :as str]))
+
+(defn- non-blank-string?
+  [value]
+  (and (string? value) (not (str/blank? value))))
 
 (defn- build-body
   "Build the request body for chat completion."
@@ -19,8 +24,9 @@
 (defn- build-request-opts
   "Build HTTP request options map."
   [{:keys [api-key headers body http-timeout-ms]}]
-  {:headers (merge {"content-type" "application/json"
-                    "Authorization" (str "Bearer " api-key)}
+  {:headers (merge (cond-> {"content-type" "application/json"}
+                     (non-blank-string? api-key)
+                     (assoc "Authorization" (str "Bearer " api-key)))
                    headers)
    :body body
    :timeout http-timeout-ms})

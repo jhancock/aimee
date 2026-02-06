@@ -20,13 +20,20 @@ Calling `:stop!` requests termination and closes the active stream if present.
 
 - `:channel` caller-created `core.async` channel
 - `:url` OpenAI-compatible chat completions endpoint
-- `:api-key` bearer token
 - `:model` model id string
 - `:messages` non-empty sequence of chat messages
+- API credentials via one of:
+  - `:api-key`
+  - `:api-key-fn` (resolver function)
+  - `:headers` containing `Authorization`
+  - environment variable named by `:api-key-env` (default `OPENAI_API_KEY`)
 
 ## Optional options
 
 - `:stream?` default `false`
+- `:api-key` default `nil` (resolved from `:api-key-fn` / env when omitted)
+- `:api-key-fn` default `nil` (called with opts map when arity supports it, otherwise 0-arity)
+- `:api-key-env` default `"OPENAI_API_KEY"`
 - `:parse-chunks?` default `true`
 - `:accumulate?` default `true`
 - `:on-parse-error` `:stop` (default) or `:continue`

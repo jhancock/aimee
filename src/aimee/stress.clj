@@ -4,8 +4,7 @@
             [aimee.chat.parser :as parser]
             [aimee.chat.sse :as chat-sse]
             [aimee.sse :as sse]
-            [clojure.core.async :as async]
-            [parker.config :as config]))
+            [clojure.core.async :as async]))
 
 (defn make-sse-sample
   "Create an SSE sample with n chunk events and a [DONE] sentinel."
@@ -13,6 +12,15 @@
   (str (apply str
               (repeat n "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n"))
        "data: [DONE]\n\n"))
+
+(defn- default-openai-url
+  []
+  (or (System/getenv "OPENAI_URL")
+      "https://api.openai.com/v1/chat/completions"))
+
+(defn- default-openai-key
+  []
+  (System/getenv "OPENAI_API_KEY"))
 
 (defn run-overflow-test!
   "Simulate overflow handling using a local SSE stream and a slow consumer.
@@ -60,20 +68,24 @@
   "Simulate idle-timeout by starting a streaming request and not consuming it.
 
   Options:
+  - :openai-url (default OPENAI_URL or OpenAI chat completions endpoint)
+  - :openai-key (default OPENAI_API_KEY)
   - :channel-idle-timeout-ms (default 1500)
   - :buffer-size (default 1)
   - :max-wait-ms (default 5000)
   - :message (default long prompt to trigger multiple chunks)
   "
-  [{:keys [channel-idle-timeout-ms buffer-size max-wait-ms message]
-    :or {channel-idle-timeout-ms 1500
+  [{:keys [openai-url openai-key channel-idle-timeout-ms buffer-size max-wait-ms message]
+    :or {openai-url (default-openai-url)
+         openai-key (default-openai-key)
+         channel-idle-timeout-ms 1500
          buffer-size 1
          max-wait-ms 5000
          message "Write 200 words about a small cat exploring a library."}}]
   (let [ch (async/chan buffer-size)
         result (chat/start-request!
-                {:url (config/openai-url)
-                 :api-key (config/openai-key)
+                {:url openai-url
+                 :api-key openai-key
                  :channel ch
                  :model "gpt-4o-mini"
                  :stream? true
