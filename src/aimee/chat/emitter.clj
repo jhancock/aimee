@@ -12,7 +12,7 @@
 
 (defn- emit-event!
   [channel opts event close?]
-  (let [{:keys [overflow-max overflow-mode queue last-progress start-drain!]} opts]
+  (let [{:keys [overflow-max overflow-mode queue last-progress start-drain! block-warning-emitted?]} opts]
     (ensure-overflow-opts overflow-max overflow-mode)
     (if-let [q @queue]
       ;; Queue exists - route to drain thread
@@ -32,7 +32,9 @@
         ;; Channel full, block mode
         (= overflow-mode :block)
         (do
-          (log/warn "overflow disabled; applying backpressure")
+          (when (and block-warning-emitted?
+                     (compare-and-set! block-warning-emitted? false true))
+            (log/warn "overflow disabled; applying backpressure (logging once per emitter)"))
           (async/>!! channel event)
           (reset! last-progress (System/nanoTime))
           (when close?
@@ -61,6 +63,7 @@
   (let [{:keys [overflow-max overflow-mode]} opts
         queue (atom nil)
         last-progress (atom (System/nanoTime))
+        block-warning-emitted? (atom false)
         drain-started? (atom false)
         start-drain! (fn [q]
                        (when (compare-and-set! drain-started? false true)
@@ -78,10 +81,11 @@
                 (emit-event!
                  channel
                  {:overflow-max overflow-max
-                 :overflow-mode overflow-mode
-                 :queue queue
-                 :last-progress last-progress
-                 :start-drain! start-drain!}
+                  :overflow-mode overflow-mode
+                  :queue queue
+                  :last-progress last-progress
+                  :start-drain! start-drain!
+                  :block-warning-emitted? block-warning-emitted?}
                  event
                  close?))]
     (ensure-overflow-opts overflow-max overflow-mode)

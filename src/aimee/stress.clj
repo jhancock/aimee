@@ -13,14 +13,43 @@
               (repeat n "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n"))
        "data: [DONE]\n\n"))
 
-(defn- default-openai-url
-  []
-  (or (System/getenv "OPENAI_URL")
-      "https://api.openai.com/v1/chat/completions"))
+(defn- collect-until-terminal!!
+  [ch max-wait-ms]
+  (loop [events []
+         deadline (+ (System/currentTimeMillis) max-wait-ms)]
+    (let [remaining (- deadline (System/currentTimeMillis))]
+      (if (pos? remaining)
+        (let [[event port] (async/alts!! [ch (async/timeout remaining)])]
+          (cond
+            (not= port ch)
+            {:events events :timeout? true}
 
-(defn- default-openai-key
-  []
-  (System/getenv "OPENAI_API_KEY"))
+            (nil? event)
+            {:events events :closed? true}
+
+            :else
+            (let [events' (conj events event)]
+              (if (#{:complete :error} (:event event))
+                {:events events' :terminal event}
+                (recur events' deadline)))))
+        {:events events :timeout? true}))))
+
+(defn wait-until-terminated!!
+  "Wait for a run map from run-overflow-test! to report termination.
+
+  Returns {:terminated? <bool> :consumed <long> :consumer-finished? <bool> :timeout? <bool>}."
+  [run timeout-ms]
+  (let [terminated? (:terminated run)
+        consumed (:consumed run)
+        consumer (:consumer run)
+        [event port] (if consumer
+                       (async/alts!! [consumer (async/timeout timeout-ms)])
+                       [nil nil])]
+    {:terminated? (if terminated? @terminated? false)
+     :consumed (if consumed @consumed 0)
+     :consumer-finished? (and consumer (= port consumer))
+     :timeout? (and consumer (not= port consumer))
+     :consumer-result event}))
 
 (defn run-overflow-test!
   "Simulate overflow handling using a local SSE stream and a slow consumer.
@@ -68,40 +97,41 @@
   "Simulate idle-timeout by starting a streaming request and not consuming it.
 
   Options:
-  - :openai-url (default OPENAI_URL or OpenAI chat completions endpoint)
-  - :openai-key (default OPENAI_API_KEY)
+  - :openai-api-url (default OPENAI_API_URL, falls back to OPENAI_URL)
+  - :openai-api-key (default OPENAI_API_KEY)
   - :channel-idle-timeout-ms (default 1500)
-  - :buffer-size (default 1)
+  - :buffer-size (default 0)
   - :max-wait-ms (default 5000)
-  - :message (default long prompt to trigger multiple chunks)
+  - :message (default long prompt to force multi-chunk streaming)
   "
-  [{:keys [openai-url openai-key channel-idle-timeout-ms buffer-size max-wait-ms message]
-    :or {openai-url (default-openai-url)
-         openai-key (default-openai-key)
+  [{:keys [openai-api-url openai-api-key openai-url openai-key
+           channel-idle-timeout-ms buffer-size max-wait-ms message]
+    :or {openai-api-url (or (System/getenv "OPENAI_API_URL")
+                            (System/getenv "OPENAI_URL")
+                            "https://api.openai.com/v1/chat/completions")
+         openai-api-key (System/getenv "OPENAI_API_KEY")
          channel-idle-timeout-ms 1500
-         buffer-size 1
+         buffer-size 0
          max-wait-ms 5000
-         message "Write 200 words about a small cat exploring a library."}}]
-  (let [ch (async/chan buffer-size)
+         message "Write 1200 words about a small cat exploring a library."}}]
+  (let [ch (if (pos? buffer-size)
+             (async/chan buffer-size)
+             (async/chan))
         result (chat/start-request!
-                {:url openai-url
-                 :api-key openai-key
+                {:url (or openai-api-url openai-url)
+                 :api-key (or openai-api-key openai-key)
                  :channel ch
                  :model "gpt-4o-mini"
                  :stream? true
                  :channel-idle-timeout-ms channel-idle-timeout-ms
                  :messages [{:role "user" :content message}]})]
     (Thread/sleep (* 2 channel-idle-timeout-ms))
-    (loop [deadline (+ (System/currentTimeMillis) max-wait-ms)
-           last-event nil]
-      (let [remaining (- deadline (System/currentTimeMillis))]
-        (if (pos? remaining)
-          (let [[event _] (async/alts!! [ch (async/timeout remaining)])]
-            (cond
-              (nil? event) {:result result :event last-event}
-              (= :complete (:event event)) {:result result :event event}
-              :else (recur deadline event)))
-          {:result result :event last-event})))))
+    (let [{:keys [events terminal timeout? closed?]} (collect-until-terminal!! ch max-wait-ms)]
+      {:result result
+       :event (or terminal (last events))
+       :event-count (count events)
+       :timeout? timeout?
+       :closed? closed?})))
 
 (defn run-parse-chunks-test!
   "Test :parse-chunks? option with local SSE stream.
@@ -109,9 +139,10 @@
   Options:
   - :parse-chunks? (default true) - When true, chunks include :parsed key
   - :chunks (default 10)
+  - :max-wait-ms (default 5000)
   "
-  [{:keys [parse-chunks? chunks overflow-max overflow-mode]
-    :or {parse-chunks? true chunks 10 overflow-max 100 overflow-mode :queue}}]
+  [{:keys [parse-chunks? chunks overflow-max overflow-mode max-wait-ms]
+    :or {parse-chunks? true chunks 10 overflow-max 100 overflow-mode :queue max-wait-ms 5000}}]
   (let [sse-data (make-sse-sample chunks)
         input (java.io.ByteArrayInputStream. (.getBytes sse-data "UTF-8"))
         ch (async/chan 1)
@@ -130,17 +161,14 @@
        {:on-event (:on-event handlers)
         :on-complete (:on-complete handlers)
         :on-error (:on-error handlers)}))
-    ;; Collect all events
-    (Thread/sleep 100)
-    (loop [acc []]
-      (let [e (async/poll! ch)]
-        (if e
-          (recur (conj acc e))
-          (let [chunk (first (filter #(= :chunk (:event %)) acc))]
-            {:parse-chunks? parse-chunks?
-             :has-parsed? (contains? (:data chunk) :parsed)
-             :parsed (:parsed (:data chunk))
-             :event-count (count acc)}))))))
+    (let [{:keys [events timeout? closed?]} (collect-until-terminal!! ch max-wait-ms)
+          chunk (first (filter #(= :chunk (:event %)) events))]
+      {:parse-chunks? parse-chunks?
+       :has-parsed? (contains? (:data chunk) :parsed)
+       :parsed (:parsed (:data chunk))
+       :event-count (count events)
+       :timeout? timeout?
+       :closed? closed?})))
 
 (defn run-accumulate-test!
   "Test :accumulate? option with local SSE stream.
@@ -148,9 +176,10 @@
   Options:
   - :accumulate? (default true) - When true, builds content
   - :chunks (default 10)
+  - :max-wait-ms (default 5000)
   "
-  [{:keys [accumulate? chunks overflow-max overflow-mode]
-    :or {accumulate? true chunks 10 overflow-max 100 overflow-mode :queue}}]
+  [{:keys [accumulate? chunks overflow-max overflow-mode max-wait-ms]
+    :or {accumulate? true chunks 10 overflow-max 100 overflow-mode :queue max-wait-ms 5000}}]
   (let [sse-data (make-sse-sample chunks)
         input (java.io.ByteArrayInputStream. (.getBytes sse-data "UTF-8"))
         ch (async/chan 10)
@@ -172,23 +201,29 @@
         :on-event (:on-event handlers)
         :on-complete (:on-complete handlers)
         :on-error (:on-error handlers)}))
-    ;; Wait for completion and collect result
-    (Thread/sleep 500)
-    (let [events (loop [acc []]
-                   (let [e (async/poll! ch)]
-                     (if e
-                       (recur (conj acc e))
-                       acc)))]
+    (let [{:keys [events timeout? closed?]} (collect-until-terminal!! ch max-wait-ms)]
       {:accumulate? accumulate?
        :event-count (count events)
        :content (when-let [complete (first (filter #(= :complete (:event %)) events))]
-                  (:content (:data complete)))})))
+                  (:content (:data complete)))
+       :timeout? timeout?
+       :closed? closed?})))
 
 (comment
+  ;; Network helper for API-backed examples
+  (def openai-api-url (or (System/getenv "OPENAI_API_URL")
+                          (System/getenv "OPENAI_URL")
+                          "https://api.openai.com/v1/chat/completions"))
+  (def openai-api-key (System/getenv "OPENAI_API_KEY"))
+  ;; Optional local override:
+  ;; (require '[parker.config :as config])
+  ;; (def openai-api-url (config/openai-url))
+  ;; (def openai-api-key (config/openai-key))
+
   ;; Overflow stress test (local SSE stream, no network)
   (def overflow-run
     (run-overflow-test! {:chunks 2000 :overflow-max 100 :buffer-size 1 :consumer-delay-ms 10}))
-  @(:consumed overflow-run)
+  (wait-until-terminated!! overflow-run 30000)
 
   ;; Parse-chunks test (local SSE stream, no network)
   (run-parse-chunks-test! {:parse-chunks? true :chunks 5})
@@ -200,10 +235,13 @@
 
   ;; Idle-timeout test (requires OPENAI_API_KEY)
   (def idle-run
-    (run-idle-timeout-test! {:channel-idle-timeout-ms 1500 :buffer-size 1}))
+    (run-idle-timeout-test! {:openai-api-url openai-api-url
+                             :openai-api-key openai-api-key
+                             :channel-idle-timeout-ms 1500
+                             :buffer-size 0}))
   (:data (:event idle-run))
 
   ;; Overflow test with :block mode (no overflow queue)
   (def overflow-block-run
     (run-overflow-test! {:chunks 500 :overflow-mode :block :buffer-size 1 :consumer-delay-ms 10}))
-  @(:consumed overflow-block-run))
+  (wait-until-terminated!! overflow-block-run 30000))

@@ -67,14 +67,15 @@
 
 (comment
   ;; Network helper for API-backed examples
-  (def openai-url (or (System/getenv "OPENAI_URL")
-                      "https://api.openai.com/v1/chat/completions"))
-  (def openai-key (System/getenv "OPENAI_API_KEY"))
-  openai-key
+  (def openai-api-url (or (System/getenv "OPENAI_API_URL")
+                          (System/getenv "OPENAI_URL")
+                          "https://api.openai.com/v1/chat/completions"))
+  (def openai-api-key (System/getenv "OPENAI_API_KEY"))
+  openai-api-key
   ;; Optional local override:
   ;; (require '[parker.config :as config])
-  ;; (def openai-url (config/openai-url))
-  ;; (def openai-key (config/openai-key))
+  ;; (def openai-api-url (config/openai-url))
+  ;; (def openai-api-key (config/openai-key))
 
   ;; Wait for the terminal event (:complete or :error) from a channel.
   (defn await-terminal-event!! [ch timeout-ms]
@@ -121,19 +122,19 @@
   ;; Priority: :api-key > :api-key-fn > :api-key-env; Authorization header also valid.
   (def auth-base
     {:channel (async/chan 1)
-     :url openai-url
+     :url openai-api-url
      :model "gpt-4o-mini"
      :messages [{:role "user" :content "auth check"}]})
-  (chat-options/validate-opts! (assoc auth-base :api-key openai-key))
-  (chat-options/validate-opts! (assoc auth-base :api-key-fn (fn [_opts] openai-key)))
+  (chat-options/validate-opts! (assoc auth-base :api-key openai-api-key))
+  (chat-options/validate-opts! (assoc auth-base :api-key-fn (fn [_opts] openai-api-key)))
   (chat-options/validate-opts! (assoc auth-base :api-key-env "OPENAI_API_KEY"))
   (chat-options/validate-opts!
-   (assoc auth-base :api-key nil :headers {"Authorization" (str "Bearer " openai-key)}))
+   (assoc auth-base :api-key nil :headers {"Authorization" (str "Bearer " openai-api-key)}))
   ;; Runtime check using :api-key-fn
   (def ch-auth (async/chan 1))
   (chat/start-request!
-   {:url openai-url
-    :api-key-fn (fn [_opts] openai-key)
+   {:url openai-api-url
+    :api-key-fn (fn [_opts] openai-api-key)
     :channel ch-auth
     :model "gpt-4o-mini"
     :stream? false
@@ -144,8 +145,8 @@
   ;; Example 1: Non-streaming call via chat client
   (def ch-1 (async/chan 1))
   (chat/start-request!
-   {:url openai-url
-    :api-key openai-key
+   {:url openai-api-url
+    :api-key openai-api-key
     :channel ch-1
     :model "gpt-4o-mini"
     :stream? false
@@ -155,8 +156,8 @@
 
   ;; Example 2: Standard streaming with :parsed chunks and accumulation (default)
   (def stream-2
-    (start! {:url openai-url
-             :api-key openai-key
+    (start! {:url openai-api-url
+             :api-key openai-api-key
              :stream? true
              :model "gpt-4o-mini"
              :messages [{:role "user" :content "Say hello in two sentences."}]}))
@@ -187,8 +188,8 @@
 
   ;; Example 2b: Streaming with usage included (:include-usage? true)
   (def stream-2b
-    (start! {:url openai-url
-             :api-key openai-key
+    (start! {:url openai-api-url
+             :api-key openai-api-key
              :stream? true
              :include-usage? true
              :model "gpt-4o-mini"
@@ -205,8 +206,8 @@
   ;; Example 3: Raw SSE proxy mode (no parsing, no accumulation)
   ;; Use this when forwarding chunks directly to a browser
   (def stream-3
-    (start! {:url openai-url
-             :api-key openai-key
+    (start! {:url openai-api-url
+             :api-key openai-api-key
              :stream? true
              :parse-chunks? false
              :accumulate? false
@@ -224,8 +225,8 @@
   ;; Example 4: Parsed chunks without accumulation
   ;; Get deltas via :parsed but don't build content
   (def stream-4
-    (start! {:url openai-url
-             :api-key openai-key
+    (start! {:url openai-api-url
+             :api-key openai-api-key
              :stream? true
              :accumulate? false
              :model "gpt-4o-mini"
@@ -432,8 +433,8 @@
   ;; Read one early chunk, then stop consuming to force channel stall and timeout.
   (def ch-7 (async/chan 1))
   (def result-7 (chat/start-request!
-                 {:url openai-url
-                  :api-key openai-key
+                 {:url openai-api-url
+                  :api-key openai-api-key
                   :channel ch-7
                   :model "gpt-4o-mini"
                   :stream? true
@@ -456,8 +457,8 @@
   ;; After timeout elapses, first terminal read should be {:reason :timeout}.
   (def ch-7b (async/chan))
   (def result-7b (chat/start-request!
-                  {:url openai-url
-                   :api-key openai-key
+                  {:url openai-api-url
+                   :api-key openai-api-key
                    :channel ch-7b
                    :model "gpt-4o-mini"
                    :stream? true
@@ -473,8 +474,8 @@
   ;; Use a long prompt and wait for the terminal event after stop.
   (def ch-8 (async/chan 1))
   (def result-8 (chat/start-request!
-                 {:url openai-url
-                  :api-key openai-key
+                 {:url openai-api-url
+                  :api-key openai-api-key
                   :channel ch-8
                   :model "gpt-4o-mini"
                   :stream? true
@@ -490,8 +491,8 @@
   ;; The channel fills immediately, so no progress is recorded and timeout fires.
   (def ch-9 (async/chan 1))
   (def result-9 (chat/start-request!
-                 {:url openai-url
-                  :api-key openai-key
+                 {:url openai-api-url
+                  :api-key openai-api-key
                   :channel ch-9
                   :model "gpt-4o-mini"
                   :stream? true
@@ -507,8 +508,8 @@
   ;; Even with delayed consumption, terminal event should be normal completion, not :timeout.
   (def ch-9b (async/chan 1))
   (def result-9b (chat/start-request!
-                  {:url openai-url
-                   :api-key openai-key
+                  {:url openai-api-url
+                   :api-key openai-api-key
                    :channel ch-9b
                    :model "gpt-4o-mini"
                    :stream? true
