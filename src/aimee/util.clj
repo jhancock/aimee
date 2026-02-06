@@ -1,8 +1,10 @@
-(ns aimee.util)
+(ns aimee.util
+  "Internal runtime/logging helpers used by core namespaces.")
 
 (defn thread-info
-  "Return a map with information about the current thread.
+  "Internal helper for consistent thread diagnostics in logs.
 
+  Returns a map with information about the current thread.
   Requires JDK 21+ for virtual thread support."
   []
   (let [t (Thread/currentThread)]

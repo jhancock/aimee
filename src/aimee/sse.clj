@@ -1,7 +1,6 @@
 (ns aimee.sse
   (:require [aimee.sse-parser :as parser]
             [aimee.util :as util]
-            [clojure.core.async :as async]
             [clojure.tools.logging :as log])
   (:import (java.io BufferedReader InputStream InputStreamReader)))
 

@@ -1,5 +1,23 @@
 # API Reference
 
+## API surface and stability
+
+Stable public API for application code:
+
+- `aimee.chat.client/start-request!`
+- `aimee.chat.options/defaults` (REPL discovery convenience)
+- `aimee.sse-helpers/format-sse-data`
+- `aimee.sse-helpers/format-sse-done`
+- `aimee.sse-helpers/event->simplified-sse`
+
+Development helpers (not stability-guaranteed):
+
+- `aimee.simulator/*`
+- `aimee.stress/*`
+- `aimee.scheduler-simulator/*`
+
+All other vars and namespaces should be treated as internal implementation details and may change without notice.
+
 ## Entry point
 
 `aimee.chat.client/start-request!`

@@ -2,6 +2,11 @@
 
 Aimee is a `core.async`-first client for OpenAI-compatible chat completions.
 
+## API surface policy
+
+- Stable public API is documented in `docs/api.md`.
+- `aimee.simulator`, `aimee.stress`, and `aimee.scheduler-simulator` are REPL/dev namespaces and are not stability-guaranteed for application code.
+
 ## Design constraints
 
 - Caller owns the channel.

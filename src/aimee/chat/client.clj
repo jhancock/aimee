@@ -7,7 +7,7 @@
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]))
 
-(defn make-stop-fn
+(defn- make-stop-fn
   "Create a stop function that cancels the request."
   [stop? stream-ref]
   (fn []

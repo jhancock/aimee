@@ -57,7 +57,7 @@
                     {:event event :close? close?})
               true)))))))
 
-(defn make-emitter
+(defn- make-emitter
   "Create an emitter for delivering event maps to a channel."
   [channel opts]
   (let [{:keys [overflow-max overflow-mode]} opts

@@ -35,7 +35,7 @@
              :data (str/join "\n" (:data-lines state))}
       capture-raw? (assoc :raw {:lines (:raw-lines state)}))))
 
-(defn finish-event [state opts]
+(defn- finish-event [state opts]
   (let [event (build-event state (:capture-raw? opts))
         next-state (-> state
                        (assoc :last-id (or (:event-id state) (:last-id state)))
