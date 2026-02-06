@@ -2,6 +2,40 @@
   (:require [cheshire.core :as json]
             [clojure.string :as str]))
 
+(defn- parse-sse-payload
+  [payload]
+  (let [object (:object payload)]
+    (if (and object (not= object "chat.completion.chunk"))
+      {:skip? true}
+      (let [delta (get-in payload [:choices 0 :delta])
+            content (get delta :content "")
+            refusal (get delta :refusal)
+            refusal? (when (and (string? refusal) (not (str/blank? refusal))) true)
+            content (if (and (empty? content) refusal?) refusal content)
+            role (get delta :role)
+            tool-calls (get delta :tool_calls)
+            function-call (get delta :function_call)
+            finish-reason (get-in payload [:choices 0 :finish_reason])
+            usage (:usage payload)
+            base {:content content
+                  :role role
+                  :tool-calls tool-calls
+                  :function-call function-call
+                  :finish-reason finish-reason
+                  :usage usage
+                  :done? (some? finish-reason)}]
+        (cond-> base
+          refusal? (assoc :refusal refusal
+                          :refusal? true))))))
+
+(defn- parse-sse-data-with
+  [data parse-payload-fn]
+  (cond
+    (nil? data) {:content "" :finish-reason nil}
+    (= data "[DONE]") {:done? true}
+    :else
+    (parse-sse-payload (parse-payload-fn data))))
+
 (defn parse-sse-event
   "Parse OpenAI SSE event data.
 
@@ -12,36 +46,12 @@
   Refusal text is normalized into :content when content is blank.
   "
   [data]
-  (cond
-    (nil? data) {:content "" :finish-reason nil}
-    (= data "[DONE]") {:done? true}
-    :else
-    (let [payload (try
-                    (json/parse-string data true)
-                    (catch Exception _ nil))
-          object (:object payload)]
-      (if (and object (not= object "chat.completion.chunk"))
-        {:skip? true}
-        (let [delta (get-in payload [:choices 0 :delta])
-              content (get delta :content "")
-              refusal (get delta :refusal)
-              refusal? (when (and (string? refusal) (not (str/blank? refusal))) true)
-              content (if (and (empty? content) refusal?) refusal content)
-              role (get delta :role)
-              tool-calls (get delta :tool_calls)
-              function-call (get delta :function_call)
-              finish-reason (get-in payload [:choices 0 :finish_reason])
-              usage (:usage payload)
-              base {:content content
-                    :role role
-                    :tool-calls tool-calls
-                    :function-call function-call
-                    :finish-reason finish-reason
-                    :usage usage
-                    :done? (some? finish-reason)}]
-          (cond-> base
-            refusal? (assoc :refusal refusal
-                            :refusal? true)))))))
+  (parse-sse-data-with
+   data
+   (fn [raw]
+     (try
+       (json/parse-string raw true)
+       (catch Exception _ nil)))))
 
 (defn parse-sse-event!
   "Parse OpenAI SSE event data, throwing on parse error.
@@ -54,34 +64,7 @@
   Refusal text is normalized into :content when content is blank.
   "
   [data]
-  (cond
-    (nil? data) {:content "" :finish-reason nil}
-    (= data "[DONE]") {:done? true}
-    :else
-    (let [payload (json/parse-string data true)
-          object (:object payload)]
-      (if (and object (not= object "chat.completion.chunk"))
-        {:skip? true}
-        (let [delta (get-in payload [:choices 0 :delta])
-              content (get delta :content "")
-              refusal (get delta :refusal)
-              refusal? (when (and (string? refusal) (not (str/blank? refusal))) true)
-              content (if (and (empty? content) refusal?) refusal content)
-              role (get delta :role)
-              tool-calls (get delta :tool_calls)
-              function-call (get delta :function_call)
-              finish-reason (get-in payload [:choices 0 :finish_reason])
-              usage (:usage payload)
-              base {:content content
-                    :role role
-                    :tool-calls tool-calls
-                    :function-call function-call
-                    :finish-reason finish-reason
-                    :usage usage
-                    :done? (some? finish-reason)}]
-          (cond-> base
-            refusal? (assoc :refusal refusal
-                            :refusal? true)))))))
+  (parse-sse-data-with data #(json/parse-string % true)))
 
 (defn parse-final-response
   "Parse a non-streaming chat response body.
