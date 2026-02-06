@@ -88,6 +88,33 @@
       refusal? (assoc :refusal refusal
                       :refusal? true))))
 
+(defn- normalize-acc
+  [acc]
+  (if (map? acc) acc {:content (or acc "")}))
+
+(defn- event-fields
+  [event]
+  (if-let [parsed (:parsed event)]
+    parsed
+    (parse-sse-event (:data event))))
+
+(defn- merge-metadata
+  [acc-map {:keys [role tool-calls function-call finish-reason usage refusal refusal?]}]
+  (cond-> acc-map
+    role (assoc :role role)
+    tool-calls (assoc :tool-calls tool-calls)
+    function-call (assoc :function-call function-call)
+    finish-reason (assoc :finish-reason finish-reason)
+    usage (assoc :usage usage)
+    refusal (update :refusal (fnil str "") refusal)
+    refusal? (assoc :refusal? true)))
+
+(defn- append-content
+  [acc-map content]
+  (if (and (string? content) (empty? content))
+    acc-map
+    (update acc-map :content (fnil str "") content)))
+
 (defn accumulate-content
   "Append delta content to the accumulator map.
 
@@ -97,74 +124,25 @@
   in chunk events). Otherwise falls back to parsing the :data field.
   "
   [acc event]
-  (let [acc-map (if (map? acc) acc {:content (or acc "")})
-        {:keys [content done? role tool-calls function-call finish-reason usage skip? refusal refusal?]}
-        (if-let [parsed (:parsed event)]
-          parsed
-          (parse-sse-event (:data event)))]
+  (let [acc-map (normalize-acc acc)
+        {:keys [content done? skip?] :as fields} (event-fields event)]
     (cond
       skip?
       acc-map
 
       done?
-      (cond-> acc-map
-        role (assoc :role role)
-        tool-calls (assoc :tool-calls tool-calls)
-        function-call (assoc :function-call function-call)
-        finish-reason (assoc :finish-reason finish-reason)
-        usage (assoc :usage usage)
-        refusal (update :refusal (fnil str "") refusal)
-        refusal? (assoc :refusal? true))
-
-      (and (string? content) (empty? content))
-      (cond-> acc-map
-        role (assoc :role role)
-        tool-calls (assoc :tool-calls tool-calls)
-        function-call (assoc :function-call function-call)
-        finish-reason (assoc :finish-reason finish-reason)
-        usage (assoc :usage usage)
-        refusal (update :refusal (fnil str "") refusal)
-        refusal? (assoc :refusal? true))
+      (merge-metadata acc-map fields)
 
       :else
-      (cond-> acc-map
-        true (update :content (fnil str "") content)
-        role (assoc :role role)
-        tool-calls (assoc :tool-calls tool-calls)
-        function-call (assoc :function-call function-call)
-        finish-reason (assoc :finish-reason finish-reason)
-        usage (assoc :usage usage)
-        refusal (update :refusal (fnil str "") refusal)
-        refusal? (assoc :refusal? true)))))
+      (-> acc-map
+          (append-content content)
+          (merge-metadata fields)))))
 
 (defn accumulate-metadata
   "Accumulate metadata without appending content."
   [acc event]
-  (let [acc-map (if (map? acc) acc {:content (or acc "")})
-        {:keys [done? role tool-calls function-call finish-reason usage skip? refusal refusal?]}
-        (if-let [parsed (:parsed event)]
-          parsed
-          (parse-sse-event (:data event)))]
-    (cond
-      skip?
+  (let [acc-map (normalize-acc acc)
+        {:keys [skip?] :as fields} (event-fields event)]
+    (if skip?
       acc-map
-
-      done?
-      (cond-> acc-map
-        role (assoc :role role)
-        tool-calls (assoc :tool-calls tool-calls)
-        function-call (assoc :function-call function-call)
-        finish-reason (assoc :finish-reason finish-reason)
-        usage (assoc :usage usage)
-        refusal (update :refusal (fnil str "") refusal)
-        refusal? (assoc :refusal? true))
-
-      :else
-      (cond-> acc-map
-        role (assoc :role role)
-        tool-calls (assoc :tool-calls tool-calls)
-        function-call (assoc :function-call function-call)
-        finish-reason (assoc :finish-reason finish-reason)
-        usage (assoc :usage usage)
-        refusal (update :refusal (fnil str "") refusal)
-        refusal? (assoc :refusal? true)))))
+      (merge-metadata acc-map fields))))
