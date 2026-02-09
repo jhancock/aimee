@@ -31,6 +31,12 @@
    :body body
    :timeout http-timeout-ms})
 
+(defn- close-stream-safe
+  "Close stream silently, swallowing any exceptions."
+  [stream]
+  (when stream
+    (try (.close stream) (catch Exception _))))
+
 (defn- ok-status? [status]
   (<= 200 status 299))
 
@@ -66,12 +72,12 @@
         (reset! stream-ref stream)
         (cond
           @stop?
-          (do (try (.close stream) (catch Exception _))
+          (do (close-stream-safe stream)
               ((:complete! channel-callbacks) {:content "" :reason :stopped}))
 
           (not (ok-status? status))
           (let [body (read-body-safe stream)]
-            (try (.close stream) (catch Exception _))
+            (close-stream-safe stream)
             (handle-http-error! channel-callbacks status body))
 
           :else
@@ -83,9 +89,9 @@
                                 :on-parse-error on-parse-error
                                 :parse-chunks? parse-chunks?})
                 accumulator (cond
-                              accumulate? parser/accumulate-content
-                              parse-chunks? parser/accumulate-metadata
-                              :else nil)]
+                             accumulate? parser/accumulate-content
+                             parse-chunks? parser/accumulate-metadata
+                             :else nil)]
             (sse/consume-sse!
              stream
              {:accumulator accumulator
