@@ -28,24 +28,27 @@
     (.cancel ^ScheduledFuture shutdown-task false)
     (swap! scheduler-state assoc :shutdown-task nil)))
 
+;; Atomic check-and-set to prevent race where a timer is added
+;; between checking (empty? timers) and scheduling shutdown.
 (defn- schedule-shutdown-if-idle!
   ([]
    (schedule-shutdown-if-idle! *shutdown-idle-ms*))
   ([idle-ms]
-   (let [{:keys [executor timers shutdown-task]} @scheduler-state]
-     (when (and executor (empty? timers) (nil? shutdown-task))
-       (let [task (.schedule
-                   ^ScheduledExecutorService executor
-                   (fn []
-                     (let [{:keys [executor timers]} @scheduler-state]
-                       (when (and executor (empty? timers))
-                         (.shutdown ^ScheduledExecutorService executor)
-                         (swap! scheduler-state assoc
-                                :executor nil
-                                :shutdown-task nil))))
-                   idle-ms
-                   TimeUnit/MILLISECONDS)]
-         (swap! scheduler-state assoc :shutdown-task task))))))
+   (swap! scheduler-state
+          (fn [{:keys [executor timers shutdown-task] :as state}]
+            (if (and executor (empty? timers) (nil? shutdown-task))
+              (let [task (.schedule
+                          ^ScheduledExecutorService executor
+                          (fn []
+                            (swap! scheduler-state
+                                   (fn [{:keys [executor timers] :as inner-state}]
+                                     (when (and executor (empty? timers))
+                                       (.shutdown ^ScheduledExecutorService executor))
+                                     (assoc inner-state :executor nil :shutdown-task nil))))
+                          idle-ms
+                          TimeUnit/MILLISECONDS)]
+                (assoc state :shutdown-task task))
+              state)))))
 
 (defn schedule-fixed-delay!
   "Schedule a fixed-delay task on the shared scheduler.
@@ -77,3 +80,11 @@
      :shutdown? (when executor (.isShutdown ^ScheduledExecutorService executor))
      :timers (count timers)
      :shutdown-task? (some? shutdown-task)}))
+
+(defn reset-for-testing!
+  "Reset scheduler state to initial state. For testing only."
+  []
+  (reset! scheduler-state {:executor nil
+                            :timers {}
+                            :shutdown-task nil})
+  nil)

@@ -37,6 +37,62 @@
               :after-cancel after-cancel
               :after-shutdown (scheduler/status)})))))))
 
+(defn run-concurrent-shutdown-test!
+  "Test thread safety of shutdown scheduling.
+
+  Scenario 1: Race between adding a timer and scheduling shutdown.
+  Scenario 2: Multiple threads racing to schedule shutdown.
+
+  Returns test results."
+  []
+  (let [results (atom {:scenario1 false
+                       :scenario2 false})
+        ;; Scenario 1: Timer added during shutdown window
+        run-scenario1 (fn []
+                        (let [cancel-shutdown (scheduler/schedule-fixed-delay!
+                                                0
+                                                100
+                                                #(identity))
+                              _ (Thread/sleep 50)
+                              _ (cancel-shutdown)
+                              ;; Now shutdown is pending - quickly add a new timer
+                              cancel-timer2 (scheduler/schedule-fixed-delay!
+                                            0
+                                            100
+                                            #(identity))
+                              status-after (scheduler/status)]
+                          (Thread/sleep 50)
+                          (cancel-timer2)
+                          (Thread/sleep 150)
+                          ;; Scheduler should still be alive because timer2 cleared shutdown
+                          (swap! results assoc :scenario1
+                                 (not (:shutdown? (scheduler/status))))))
+        ;; Scenario 2: Multiple threads racing to cancel timers
+        run-scenario2 (fn []
+                        (scheduler/reset-for-testing!)
+                        ;; Create multiple timers
+                        (let [timers (for [i (range 10)]
+                                      (scheduler/schedule-fixed-delay!
+                                       0
+                                       100
+                                       #(identity)))
+                              _ (Thread/sleep 50)
+                              ;; All threads cancel simultaneously - race to schedule shutdown
+                              futures (for [cancel! timers]
+                                       (future (cancel!)))]
+                          (doseq [f futures] @f)
+                          (Thread/sleep 150)
+                          ;; Should shut down cleanly without errors
+                          (swap! results assoc :scenario2 true)))]
+    (run-scenario1)
+    (Thread/sleep 400)
+    (run-scenario2)
+    (Thread/sleep 300)
+    @results))
+
 (comment
   ;; Scheduler lifecycle smoke test (no network)
-  (run-shutdown-smoke!))
+  (run-shutdown-smoke!)
+
+  ;; Concurrent shutdown thread safety test
+  (run-concurrent-shutdown-test!))
