@@ -1,4 +1,4 @@
-(ns aimee.sse-helpers
+(ns aimee.chat.sse-helpers
   (:require [aimee.chat.parser :as chat-parser]
             [cheshire.core :as json]
             [clojure.string :as str]))

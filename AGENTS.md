@@ -11,6 +11,7 @@
   - `emitter.clj` channel emission and backpressure
   - `timeout.clj` idle-timeout behavior
   - `events.clj` event constructors
+  - `sse-helpers.clj` browser SSE formatting (chat protocol specific)
 - Low-level SSE framing/parsing is in `src/aimee/sse.clj` and `src/aimee/sse_parser.clj`.
 - REPL/dev helpers are in `src/aimee/simulator.clj`, `src/aimee/stress.clj`, and `src/aimee/scheduler_simulator.clj`.
 - No `test/` source set is used for standalone test execution at this stage.
@@ -33,7 +34,7 @@
 
 ## Coding Style & Naming Conventions
 - Use standard Clojure formatting and 2-space indentation.
-- Use kebab-case for namespaces/functions (file-level underscore exception: `src/aimee/sse_helpers.clj`).
+- Use kebab-case for namespaces/functions.
 - Prefer explicit state names (`stop?`, `stream-ref`, `terminated?`, `last-progress`).
 - Caller-owned channels are passed via `:channel`; this library writes events and closes channel on terminal events.
 

@@ -1,7 +1,7 @@
 (ns aimee.simulator
   (:require [aimee.chat.client :as chat]
             [aimee.util :as util]
-            [aimee.sse-helpers :as helpers]
+            [aimee.chat.sse-helpers :as helpers]
             [clojure.core.async :as async]
             [clojure.tools.logging :as log]))
 
