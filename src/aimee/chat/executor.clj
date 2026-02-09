@@ -98,6 +98,7 @@
               :initial-acc {:content ""}
               :stop? stop?
               :terminated? (:terminated? channel-callbacks)
+              :max-data-lines (:max-data-lines opts)
               :on-event (:on-event sse-callbacks)
               :on-complete (:on-complete sse-callbacks)
               :on-error (:on-error sse-callbacks)})))))))

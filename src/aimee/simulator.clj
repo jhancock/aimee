@@ -119,7 +119,7 @@
   @local-complete
 
   ;; Example 0a: Auth resolution and validation (no network)
-  ;; Priority: :api-key > :api-key-fn > :api-key-env; Authorization header also valid.
+  ;; Provide :api-key, :api-key-fn, or Authorization header. Missing auth is an error.
   (def auth-base
     {:channel (async/chan 1)
      :url openai-api-url
@@ -127,9 +127,8 @@
      :messages [{:role "user" :content "auth check"}]})
   (chat-options/validate-opts! (assoc auth-base :api-key openai-api-key))
   (chat-options/validate-opts! (assoc auth-base :api-key-fn (fn [_opts] openai-api-key)))
-  (chat-options/validate-opts! (assoc auth-base :api-key-env "OPENAI_API_KEY"))
   (chat-options/validate-opts!
-   (assoc auth-base :api-key nil :headers {"Authorization" (str "Bearer " openai-api-key)}))
+   (assoc auth-base :headers {"Authorization" (str "Bearer " openai-api-key)}))
   ;; Runtime check using :api-key-fn
   (def ch-auth (async/chan 1))
   (chat/start-request!

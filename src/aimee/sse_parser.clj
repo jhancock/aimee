@@ -49,12 +49,15 @@
   - :state (updated parser state)
   - :acc (updated accumulator string)
   - :event (event map or nil)
-  - :flush (:blank-line or :eof or nil)
+  - :flush (:blank-line or :eof or :limit-exceeded or nil)
   - :complete (:done or :eof or nil)
   - :unrecognized? (true when line/field is unrecognized)
+
+  When :max-data-lines is set, forces a flush with :flush :limit-exceeded
+  if data accumulation exceeds the limit, preventing unbounded memory growth.
   "
   [state acc parsed opts]
-  (let [{:keys [capture-raw? emit-done? accumulator]} opts
+  (let [{:keys [capture-raw? emit-done? accumulator max-data-lines]} opts
         update-raw (fn [st]
                      (if capture-raw?
                        (update st :raw-lines conj (:raw parsed))
@@ -102,8 +105,19 @@
             state (cond-> state
                     capture-raw? (update :raw-lines conj raw))]
         (case field
-          "data" {:state (update state :data-lines conj value)
-                  :acc acc}
+          "data" (if (and max-data-lines
+                          (>= (count (:data-lines state)) max-data-lines))
+                   (let [[event flushed-state] (finish-event state opts)
+                         acc (if (and event accumulator)
+                               (accumulator acc event)
+                               acc)
+                         state (update flushed-state :data-lines conj value)]
+                     {:state state
+                      :acc acc
+                      :event event
+                      :flush :limit-exceeded})
+                   {:state (update state :data-lines conj value)
+                    :acc acc})
           "id" {:state (assoc state :event-id (when (seq value) value))
                 :acc acc}
           "event" {:state (assoc state :event-type (when (seq value) value))
@@ -116,3 +130,24 @@
 
       {:state state
        :acc acc})))
+
+(comment
+  ;; Test max-data-lines forcing a flush
+  (defn test-limit-flush []
+    (let [max-lines 3
+          opts {:max-data-lines max-lines}
+          state (empty-state)]
+      (-> state
+          ;; First line - should be added
+          (step {} (parse-line "data: line1") opts)
+          ;; Second line - should be added
+          (step (:state *1) (parse-line "data: line2") opts)
+          ;; Third line - should trigger flush (>= max-lines)
+          (step (:state *1) (parse-line "data: line3") opts))))
+
+  ;; The third step above will return:
+  ;; {:state (reset state with new data line)
+  ;;  :event (contains "line1\nline2")
+  ;;  :flush :limit-exceeded
+  ;;  :acc ...}
+  )

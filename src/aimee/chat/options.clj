@@ -30,14 +30,15 @@
    ;; Note: enqueuing into the overflow buffer does not count as progress.
    :http-timeout-ms nil
    ;; HTTP request timeout (ms). Nil means no explicit timeout set.
-   :api-key-env "OPENAI_API_KEY"
-   ;; Environment variable used to resolve :api-key when not provided directly.
    :headers nil
    ;; Additional HTTP headers to merge into the request.
    :include-usage? false
    ;; When true (and :stream? true), request final usage stats in :complete. Commonly, usage data comes though when :stream? is false without setting this option
    :choices-n 1
    ;; Chat completions are fixed to a single choice (choices-n=1).
+   :max-data-lines 1000
+   ;; Maximum data lines per SSE event before forcing flush. Prevents unbounded
+   ;; memory growth from malformed/malicious input.
    })
 
 (defn- non-blank-string?
@@ -61,7 +62,7 @@
       (api-key-fn))))
 
 (defn- resolve-api-key
-  [{:keys [api-key api-key-fn api-key-env] :as opts}]
+  [{:keys [api-key api-key-fn] :as opts}]
   (let [opts (if (non-blank-string? api-key)
                opts
                (dissoc opts :api-key))
@@ -70,11 +71,7 @@
                      (when (ifn? api-key-fn)
                        (let [value (call-api-key-fn api-key-fn opts)]
                          (when (non-blank-string? value)
-                           value)))
-                     (let [env-name (or api-key-env "OPENAI_API_KEY")
-                           value (System/getenv env-name)]
-                       (when (non-blank-string? value)
-                         value)))]
+                           value))))]
     (cond-> opts
       resolved (assoc :api-key resolved))))
 
@@ -91,7 +88,6 @@
 (s/def ::url non-blank-string?)
 (s/def ::api-key non-blank-string?)
 (s/def ::api-key-fn ifn?)
-(s/def ::api-key-env non-blank-string?)
 (s/def ::model non-blank-string?)
 (s/def ::messages (s/and sequential? seq))
 (s/def ::stream? boolean?)
@@ -107,13 +103,13 @@
 (s/def ::include-usage? boolean?)
 
 (s/def ::choices-n #{1})
+(s/def ::max-data-lines (s/nilable pos-int?))
 
 (s/def ::opts
   (s/keys :req-un [::channel ::url ::model ::messages]
           :opt-un [::stream?
                    ::api-key
                    ::api-key-fn
-                   ::api-key-env
                    ::parse-chunks?
                    ::accumulate?
                    ::on-parse-error
@@ -123,7 +119,8 @@
                    ::http-timeout-ms
                    ::headers
                    ::include-usage?
-                   ::choices-n]))
+                   ::choices-n
+                   ::max-data-lines]))
 
 (defn validate-opts!
   "Validate and normalize required options. Throws ex-info if invalid.

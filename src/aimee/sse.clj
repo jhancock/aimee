@@ -56,6 +56,11 @@
                 {:raw (:raw parsed)
                  :last-lines last-lines
                  :thread (util/thread-info)}))
+    (when (= flush :limit-exceeded)
+      (log/warn "sse data-line limit exceeded, forcing flush"
+                {:data-line-count (count (:data-lines state))
+                 :max-data-lines (:max-data-lines opts)
+                 :thread (util/thread-info)}))
     (when event
       (when on-event
         (on-event event)))
@@ -106,6 +111,7 @@
   - :sample-rate (0.0 - 1.0, default 0.0)
   - :close-input? (default true)
   - :emit-done? (default false)
+  - :max-data-lines (default nil) - maximum data lines per event before forcing flush
   "
   [^InputStream input-stream opts]
   (let [{:keys [on-event on-complete on-error on-line on-flush accumulator initial-acc

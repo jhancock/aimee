@@ -27,7 +27,6 @@
     - :api-key
     - :api-key-fn (called with opts map when arity supports it, otherwise 0-arity)
     - :headers containing Authorization
-    - environment variable from :api-key-env (default OPENAI_API_KEY)
 
   Streaming behavior opts (when :stream? true):
   - :parse-chunks? (default true) - When true, each :chunk event includes :parsed key
