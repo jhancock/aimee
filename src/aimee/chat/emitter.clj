@@ -41,16 +41,26 @@
             (async/close! channel))
           true)
 
+        ;; If drain init fails, reset queue and fall back to block mode.
         ;; Channel full, queue mode - create overflow queue
         :else
         (let [new-q (java.util.concurrent.LinkedBlockingQueue. overflow-max)]
           (if (compare-and-set! queue nil new-q)
-            (do
+            (try
               (log/warn "overflow queue created"
                         {:overflow-max overflow-max})
               (start-drain! new-q)
               (.put new-q {:event event :close? close?})
-              true)
+              true
+              (catch Exception ex
+                ;; Drain thread failed; reset queue so another thread can try
+                (reset! queue nil)
+                (log/error "overflow queue drain failed; falling back to block"
+                           {:error ex})
+                (async/>!! channel event)
+                (when close?
+                  (async/close! channel))
+                true))
             (do
               ;; Another thread won queue initialization; route to that queue.
               (.put ^java.util.concurrent.LinkedBlockingQueue @queue

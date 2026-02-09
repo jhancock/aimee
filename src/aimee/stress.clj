@@ -54,6 +54,9 @@
 (defn run-overflow-test!
   "Simulate overflow handling using a local SSE stream and a slow consumer.
 
+  Tests overflow queue creation under concurrent load and verifies all events
+  are delivered without blocking the producer.
+
   Options:
   - :chunks (default 2000)
   - :overflow-max (default 100)
@@ -220,7 +223,7 @@
   ;; (def openai-api-url (config/openai-url))
   ;; (def openai-api-key (config/openai-key))
 
-  ;; Overflow stress test (local SSE stream, no network)
+  ;; Overflow queue mode: producer fills faster than consumer, queue buffers events
   (def overflow-run
     (run-overflow-test! {:chunks 2000 :overflow-max 100 :buffer-size 1 :consumer-delay-ms 10}))
   (wait-until-terminated!! overflow-run 30000)
@@ -241,7 +244,7 @@
                              :buffer-size 0}))
   (:data (:event idle-run))
 
-  ;; Overflow test with :block mode (no overflow queue)
+  ;; Block mode: immediate backpressure, no queue, producer blocks when channel full
   (def overflow-block-run
     (run-overflow-test! {:chunks 500 :overflow-mode :block :buffer-size 1 :consumer-delay-ms 10}))
   (wait-until-terminated!! overflow-block-run 30000))
