@@ -4,6 +4,8 @@
 .clj-kondo/.cache
 .lsp/.cache
 .lsp/sqlite.db
+.crush
+.claude
 .nrepl-history
 .nrepl-port
 .portal/vs-code.edn
