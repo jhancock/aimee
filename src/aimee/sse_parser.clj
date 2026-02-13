@@ -8,7 +8,7 @@
     (str/starts-with? line ":") {:kind :comment :raw line}
     :else
     (let [idx (str/index-of line ":")]
-      (if (neg? idx)
+      (if (nil? idx)
         {:kind :unknown :raw line}
         (let [field (subs line 0 idx)
               value (subs line (inc idx))
