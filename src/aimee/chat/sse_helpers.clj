@@ -33,34 +33,50 @@
        :done? done?})
     :else {:content data}))
 
-(defn event->simplified-sse
-  "Helper: convert a channel stream event into a simplified SSE data frame.
+(defn- has-stream-meta?
+  [parsed]
+  (boolean
+   (some some? [(:role parsed)
+                (:tool-calls parsed)
+                (:function-call parsed)])))
 
-  Returns a DONE frame for completion items that include a [DONE] payload,
-  and nil for empty content or non-streaming completion.
+(defn- chunk->payload
+  [chunk]
+  (let [parsed (or (:parsed chunk) (extract-content (:data chunk)))
+        content (or (:content parsed) "")
+        has-meta? (has-stream-meta? parsed)]
+    (when (or (not (empty? content)) has-meta?)
+      (cond-> {:text content}
+        (some? (:role parsed)) (assoc :role (:role parsed))
+        (some? (:tool-calls parsed)) (assoc :tool-calls (:tool-calls parsed))
+        (some? (:function-call parsed)) (assoc :function-call (:function-call parsed))
+        (:refusal? parsed) (assoc :refusal? true)))))
+
+(defn event->simplified-sse
+  "Convert a channel event into a simplified SSE frame.
+
+  Input contract:
+  - Expects channel events of shape {:event <keyword> :data <payload>}.
+
+  Behavior:
+  - :chunk events with content -> `data: {\"text\":\"...\"}\\n\\n`
+  - :complete events emit DONE only when :data includes :done-event
+  - :complete events without :done-event -> nil
+  - :error events -> nil
   "
-  [item]
-  (let [event (cond
-                (and (map? item) (= :chunk (:event item))) (:data item)
-                (and (map? item) (= :complete (:event item))) (or (get-in item [:data :done-event])
-                                                                  (:data item))
-                (and (map? item) (= :error (:event item))) nil
-                :else (or (:done-event item) item))]
-    (when event
-      (let [parsed (:parsed event)
-            {:keys [content done? refusal?]} (if parsed
-                                               parsed
-                                               (extract-content (:data event)))
-            has-meta? (and parsed (or (some? (:role parsed))
-                                      (some? (:tool-calls parsed))
-                                      (some? (:function-call parsed))))
-            content (or content "")]
-        (cond
-          (and done? (empty? content) (not has-meta?)) (format-sse-done)
-          (and (empty? content) (not has-meta?)) nil
-          :else (format-sse-data
-                 (cond-> {:text content}
-                   (some? (:role parsed)) (assoc :role (:role parsed))
-                   (some? (:tool-calls parsed)) (assoc :tool-calls (:tool-calls parsed))
-                   (some? (:function-call parsed)) (assoc :function-call (:function-call parsed))
-                   refusal? (assoc :refusal? true))))))))
+  [channel-event]
+  (when (map? channel-event)
+    (case (:event channel-event)
+      :chunk
+      (some-> (:data channel-event)
+              chunk->payload
+              format-sse-data)
+
+      :complete
+      (when (get-in channel-event [:data :done-event])
+        (format-sse-done))
+
+      :error
+      nil
+
+      nil)))

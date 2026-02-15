@@ -55,3 +55,65 @@ clojure -T:build deploy
 ## Validation
 
 REPL-first via `(comment ...)` blocks in `src/aimee/example/`.
+
+## Example Chat Server
+
+Bare-bones HTTP example app that serves a one-page Deep Chat client at `/chat` and streams responses through `aimee.chat.client`.
+
+### Requirements
+
+- `OPENAI_API_KEY` must be set
+- `OPENAI_API_URL` is optional (defaults to `https://api.openai.com/v1/chat/completions`)
+- Model default is `gpt-4o-mini`
+
+### Run
+
+```sh
+clojure -M:chat-server
+```
+
+Then open:
+
+```text
+http://localhost:8080/chat
+```
+
+Optional custom port:
+
+```sh
+clojure -M:chat-server -- 8090
+```
+
+### Simple SSE Test Endpoint (No Deep Chat Client)
+
+Use `POST /chat/simple` to test streaming with a simple input string.
+
+Send plain text:
+
+```sh
+curl -N -X POST http://localhost:8080/chat/simple \
+  -H "content-type: text/plain" \
+  --data "Say hello in five words."
+```
+
+Or send JSON:
+
+```sh
+curl -N -X POST http://localhost:8080/chat/simple \
+  -H "content-type: application/json" \
+  --data '{"input":"Say hello in five words."}'
+```
+
+The endpoint streams SSE frames and ends with `data: [DONE]`.
+
+### Verify Streaming In Browser
+
+Open:
+
+```text
+http://localhost:8080/chat
+```
+
+Send a prompt and watch the assistant response stream in.
+
+Implementation lives in `src/aimee/example/chat_server.clj`.

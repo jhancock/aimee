@@ -113,3 +113,22 @@ When `:channel-idle-timeout-ms` is set and no progress for that duration:
 - `format-sse-data` — Format data as SSE
 - `format-sse-done` — Format `[DONE]` sentinel
 - `event->simplified-sse` — Convert event to SSE string
+
+### `event->simplified-sse` Completion Semantics
+
+`event->simplified-sse` is designed for streaming UIs:
+
+- Input is expected to be a channel event map: `{:event <keyword> :data <payload>}`
+- For `:chunk` events with delta content, it returns `data: {"text":"..."}\n\n`
+- For `:complete` events that include `:data :done-event` (`[DONE]`), it returns `data: [DONE]\n\n`
+- For `:complete` events that only contain accumulated final content, it returns `nil`
+
+This prevents replaying the full final message after incremental chunks were already emitted.
+
+### Recommended HTTP Bridge Pattern
+
+When bridging channel events to HTTP SSE:
+
+1. For each `:chunk`, call `event->simplified-sse` and write non-nil frames.
+2. On terminal `:complete`, write exactly one `format-sse-done` frame.
+3. On `:error`, write an error frame (optional) and then `format-sse-done`.
