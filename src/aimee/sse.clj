@@ -13,7 +13,8 @@
 (defn- build-complete-info
   [acc done-event reason]
   (let [acc-map (if (map? acc) acc {:content (or acc "")})]
-    (cond-> {:content (or (:content acc-map) "")}
+    (cond-> {:content (or (:content acc-map) "")
+             :reason reason}
       (:finish-reason acc-map) (assoc :finish-reason (:finish-reason acc-map))
       (:role acc-map) (assoc :role (:role acc-map))
       (:tool-calls acc-map) (assoc :tool-calls (:tool-calls acc-map))
@@ -21,8 +22,7 @@
       (:usage acc-map) (assoc :usage (:usage acc-map))
       (:refusal acc-map) (assoc :refusal (:refusal acc-map))
       (:refusal? acc-map) (assoc :refusal? true)
-      done-event (assoc :done-event done-event)
-      reason (assoc :reason reason))))
+      done-event (assoc :done-event done-event))))
 
 (defn- read-sse-line
   [^BufferedReader reader]
@@ -79,7 +79,8 @@
   (let [stopped? (and stop? @stop?)
         reason (cond
                  stopped? :stopped
-                 (not= complete :done) complete)]
+                 (= complete :done) :done
+                 :else complete)]
     (when (and (= complete :eof) (not stopped?))
       (log/warn "sse stream ended without done"
                 {:had-event (boolean event)
@@ -137,38 +138,52 @@
         (loop [state (parser/empty-state)
                acc initial-acc
                last-lines []]
-          (let [read-result (read-sse-line reader)]
-            (if-let [ex (:error read-result)]
-              (do
-                (error! ex)
-                (let [info (build-complete-info acc nil :error)]
-                  {:content (:content info)
-                   :finish-reason (:finish-reason info)
-                   :reason :error}))
-              (let [line (:line read-result)
-                    last-lines (update-last-lines last-lines line)
-                    parsed (parser/parse-line line)
-                    result (handle-parsed-line {:state state
-                                                :acc acc
-                                                :line line
-                                                :last-lines last-lines
-                                                :parsed parsed
-                                                :opts opts
-                                                :on-event on-event
-                                                :on-line on-line
-                                                :on-flush on-flush})
-                    {:keys [state acc event complete boundary-lines done-event]} result]
-                (if complete
-                  (let [{:keys [info result]} (handle-complete {:acc acc
-                                                                :complete complete
-                                                                :done-event done-event
-                                                                :boundary-lines boundary-lines
-                                                                :event event
-                                                                :last-lines last-lines
-                                                                :stop? stop?})]
+          ;; Proactive stop check: exit cleanly before attempting to read
+          (if (and stop? @stop?)
+            (let [info (build-complete-info acc nil :stopped)]
+              (complete! info)
+              {:content (:content info)
+               :finish-reason (:finish-reason info)
+               :reason :stopped})
+            (let [read-result (read-sse-line reader)]
+              (if-let [ex (:error read-result)]
+                ;; Race condition: stop called mid-read; treat as stopped not error
+                (if (and stop? @stop?)
+                  (let [info (build-complete-info acc nil :stopped)]
                     (complete! info)
-                    result)
-                  (recur state acc last-lines)))))))
+                    {:content (:content info)
+                     :finish-reason (:finish-reason info)
+                     :reason :stopped})
+                  (do
+                    (error! ex)
+                    (let [info (build-complete-info acc nil :error)]
+                      {:content (:content info)
+                       :finish-reason (:finish-reason info)
+                       :reason :error})))
+                (let [line (:line read-result)
+                      last-lines (update-last-lines last-lines line)
+                      parsed (parser/parse-line line)
+                      result (handle-parsed-line {:state state
+                                                  :acc acc
+                                                  :line line
+                                                  :last-lines last-lines
+                                                  :parsed parsed
+                                                  :opts opts
+                                                  :on-event on-event
+                                                  :on-line on-line
+                                                  :on-flush on-flush})
+                      {:keys [state acc event complete boundary-lines done-event]} result]
+                  (if complete
+                    (let [{:keys [info result]} (handle-complete {:acc acc
+                                                                  :complete complete
+                                                                  :done-event done-event
+                                                                  :boundary-lines boundary-lines
+                                                                  :event event
+                                                                  :last-lines last-lines
+                                                                  :stop? stop?})]
+                      (complete! info)
+                      result)
+                    (recur state acc last-lines))))))))
       (catch Exception ex
         (error! ex)
         (let [info (build-complete-info initial-acc nil :error)]

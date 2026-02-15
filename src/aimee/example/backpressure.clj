@@ -1,11 +1,31 @@
 (ns aimee.example.backpressure
   (:require [aimee.chat.client :as chat]
             [aimee.chat.emitter :as emitter]
-            [aimee.chat.parser :as parser]
             [aimee.chat.sse :as chat-sse]
-            [aimee.example.core :as core]
             [aimee.sse :as sse]
             [clojure.core.async :as async]))
+
+(defn await-terminal-event!!
+  "Wait for the terminal event (:complete or :error) from a channel.
+  
+  Returns the terminal event or nil if timeout occurs."
+  [ch timeout-ms]
+  (loop [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (let [remaining (- deadline (System/currentTimeMillis))]
+      (when (pos? remaining)
+        (let [[event port] (async/alts!! [ch (async/timeout remaining)])]
+          (cond
+            (not= port ch)
+            nil
+
+            (nil? event)
+            nil
+
+            (#{:complete :error} (:event event))
+            event
+
+            :else
+            (recur deadline)))))))
 
 (defn- make-sse-sample
   "Create an SSE sample with n chunk events and a [DONE] sentinel."
@@ -13,230 +33,176 @@
   (str (apply str (repeat n "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n"))
        "data: [DONE]\n\n"))
 
-(defn- collect-until-terminal!!
-  [ch max-wait-ms]
-  (loop [events []
-         deadline (+ (System/currentTimeMillis) max-wait-ms)]
-    (let [remaining (- deadline (System/currentTimeMillis))]
-      (if (pos? remaining)
-        (let [[event port] (async/alts!! [ch (async/timeout remaining)])]
-          (cond
-            (not= port ch)
-            {:events events :timeout? true}
-
-            (nil? event)
-            {:events events :closed? true}
-
-            :else
-            (let [events' (conj events event)]
-              (if (#{:complete :error} (:event event))
-                {:events events' :terminal event}
-                (recur events' deadline)))))
-        {:events events :timeout? true}))))
-
-(defn- wait-until-terminated!!
-  [run timeout-ms]
-  (let [terminated? (:terminated run)
-        consumed (:consumed run)
-        consumer (:consumer run)
-        [event port] (if consumer
-                       (async/alts!! [consumer (async/timeout timeout-ms)])
-                       [nil nil])]
-    {:terminated? (if terminated? @terminated? false)
-     :consumed (if consumed @consumed 0)
-     :consumer-finished? (and consumer (= port consumer))
-     :timeout? (and consumer (not= port consumer))
-     :consumer-result event}))
-
-(defn test-overflow-queue-mode!
-  "Example 5f: Overflow queue mode (:overflow-mode :queue).
-
-  Producer fills faster than consumer, queue buffers events."
-  []
-  (let [chunks 300
-        overflow-max 50
-        buffer-size 1
-        consumer-delay-ms 5
-        sse-data (make-sse-sample chunks)
-        input (java.io.ByteArrayInputStream. (.getBytes sse-data "UTF-8"))
-        ch (async/chan buffer-size)
-        terminated? (atom false)
-        callbacks (emitter/make-channel-callbacks ch {:overflow-max overflow-max
-                                                      :overflow-mode :queue
-                                                      :terminated? terminated?})
-        handlers (chat-sse/make-stream-handlers
-                  {:emit! (:emit! callbacks)
-                   :complete! (:complete! callbacks)
-                   :error! (:error! callbacks)})
-        consumed (atom 0)
-        consumer (async/thread
-                   (loop []
-                     (when-let [_event (async/<!! ch)]
-                       (swap! consumed inc)
-                       (Thread/sleep consumer-delay-ms)
-                       (recur))))
-        producer (async/thread
-                   (sse/consume-sse!
-                    input
-                    {:on-event (:on-event handlers)
-                     :on-complete (:on-complete handlers)
-                     :on-error (:on-error handlers)}))]
-    (Thread/sleep 1000)
-    {:consumed @consumed
-     :terminated? @terminated?
-     :run {:channel ch
-           :consumed consumed
-           :terminated terminated?
-           :producer producer
-           :consumer consumer}}))
-
-(defn test-block-mode!
-  "Example 5f (alt): Block mode immediate backpressure (:overflow-mode :block).
-
-  Immediate backpressure, no queue, producer blocks when channel full."
-  []
-  (let [chunks 150
-        overflow-mode :block
-        buffer-size 1
-        consumer-delay-ms 5
-        sse-data (make-sse-sample chunks)
-        input (java.io.ByteArrayInputStream. (.getBytes sse-data "UTF-8"))
-        ch (async/chan buffer-size)
-        terminated? (atom false)
-        callbacks (emitter/make-channel-callbacks ch {:overflow-max 50
-                                                      :overflow-mode overflow-mode
-                                                      :terminated? terminated?})
-        handlers (chat-sse/make-stream-handlers
-                  {:emit! (:emit! callbacks)
-                   :complete! (:complete! callbacks)
-                   :error! (:error! callbacks)})
-        consumed (atom 0)
-        consumer (async/thread
-                   (loop []
-                     (when-let [_event (async/<!! ch)]
-                       (swap! consumed inc)
-                       (Thread/sleep consumer-delay-ms)
-                       (recur))))
-        producer (async/thread
-                   (sse/consume-sse!
-                    input
-                    {:on-event (:on-event handlers)
-                     :on-complete (:on-complete handlers)
-                     :on-error (:on-error handlers)}))]
-    (Thread/sleep 1000)
-    {:consumed @consumed
-     :terminated? @terminated?
-     :run {:channel ch
-           :consumed consumed
-           :terminated terminated?
-           :producer producer
-           :consumer consumer}}))
-
-(defn test-idle-timeout-with-progress!
-  "Example 7: Idle-timeout after initial progress (deterministic timeout).
-
-  Read one early chunk, then stop consuming to force channel stall and timeout."
-  []
-  (let [ch (async/chan 1)
-        request-opts {:url core/openai-api-url
-                      :api-key core/openai-api-key
-                      :channel ch
-                      :model "gpt-4o-mini"
-                      :stream? true
-                      :channel-idle-timeout-ms 1500
-                      :messages [{:role "user"
-                                  :content "Write 1200 words about a library cat."}]}]
-    (chat/start-request! request-opts)
-    (let [first-7 (async/<!! ch)
-          event-7 (if (#{:complete :error} (:event first-7))
-                    first-7
-                    (do
-                      (Thread/sleep 2500)
-                      (core/await-terminal-event!! ch 10000)))]
-      {:first-event first-7
-       :terminal-event event-7})))
-
-(defn test-idle-timeout-without-consuming!
-  "Example 7b: Idle-timeout without consuming (confirm terminal :timeout).
-
-  Use an unbuffered channel so no consumer means zero progress from the start.
-  After timeout elapses, first terminal read should be {:reason :timeout}."
-  []
-  (let [ch (async/chan)
-        request-opts {:url core/openai-api-url
-                      :api-key core/openai-api-key
-                      :channel ch
-                      :model "gpt-4o-mini"
-                      :stream? true
-                      :channel-idle-timeout-ms 1500
-                      :messages [{:role "user"
-                                  :content "Write 1200 words about a library cat."}]}]
-    (chat/start-request! request-opts)
-    (Thread/sleep 2500)
-    (let [event-7b (core/await-terminal-event!! ch 10000)]
-      {:terminal-event event-7b})))
-
-(defn test-force-idle-timeout!
-  "Example 9: Force idle-timeout by blocking the consumer.
-
-  The channel fills immediately, so no progress is recorded and timeout fires."
-  []
-  (let [ch (async/chan 1)
-        request-opts {:url core/openai-api-url
-                      :api-key core/openai-api-key
-                      :channel ch
-                      :model "gpt-4o-mini"
-                      :stream? true
-                      :channel-idle-timeout-ms 200
-                      :messages [{:role "user"
-                                  :content "Write 1000 words about a library cat."}]}]
-    (chat/start-request! request-opts)
-    (Thread/sleep 1000)
-    (let [event-9 (async/<!! ch)]
-      {:terminal-event event-9})))
-
-(defn test-no-timeout-contrast!
-  "Example 9b: No-timeout contrast (:channel-idle-timeout-ms nil).
-
-  Even with delayed consumption, terminal event should be normal completion, not :timeout."
-  []
-  (let [ch (async/chan 1)
-        request-opts {:url core/openai-api-url
-                      :api-key core/openai-api-key
-                      :channel ch
-                      :model "gpt-4o-mini"
-                      :stream? true
-                      :channel-idle-timeout-ms nil
-                      :messages [{:role "user"
-                                  :content "Write 600 words about a library cat."}]}]
-    (chat/start-request! request-opts)
-    (Thread/sleep 2000)
-    (let [event-9b (core/await-terminal-event!! ch 30000)]
-      {:terminal-event event-9b})))
-
 (comment
-  ;; Run backpressure tests
+  ;; ---------------------------------------------------------------------------
+  ;; Backpressure module walkthrough - explicit REPL steps
+  ;; ---------------------------------------------------------------------------
+  ;;
+  ;; Demonstrates overflow handling (:queue vs :block) and idle-timeout behavior.
+  ;; Examples 1-2 are local (no network). Examples 3-6 require OPENAI_API_KEY.
+  ;; For :reason values on :complete events, see aimee.example.api.
+  ;;
+  ;; ---------------------------------------------------------------------------
 
-  ;; Overflow queue mode
-  (def overflow-queue (test-overflow-queue-mode!))
-  (:consumed overflow-queue)
+  ;; Network helpers for API-backed examples
+  (def openai-api-url (or (System/getenv "OPENAI_API_URL")
+                          "https://api.openai.com/v1/chat/completions"))
+  (def openai-api-key (System/getenv "OPENAI_API_KEY"))
+  openai-api-key
 
-  ;; Block mode
-  (def overflow-block (test-block-mode!))
-  (:consumed overflow-block)
+  ;; Helper: SSE sample data generator
+  ;; Create an SSE sample with n chunk events and a [DONE] sentinel.
+  (def sample-5 (make-sse-sample 5))
+  sample-5
 
-  ;; Idle-timeout with progress
-  (def result-7 (test-idle-timeout-with-progress!))
-  (:reason (:data (:terminal-event result-7)))
+  ;; ---------------------------------------------------------------------------
+  ;; Local SSE backpressure tests (no network required)
+  ;; ---------------------------------------------------------------------------
 
-  ;; Idle-timeout without consuming
-  (def result-7b (test-idle-timeout-without-consuming!))
-  (:reason (:data (:terminal-event result-7b)))
+  ;; Example 1: Overflow queue mode (:overflow-mode :queue)
+  ;; Producer fills faster than consumer, queue buffers events.
+  (def sse-data-1 (make-sse-sample 300))
+  (def input-1 (java.io.ByteArrayInputStream. (.getBytes sse-data-1 "UTF-8")))
+  (def ch-1 (async/chan 1))
+  (def terminated-1? (atom false))
+  (def callbacks-1 (emitter/make-channel-callbacks ch-1 {:overflow-max 50
+                                                          :overflow-mode :queue
+                                                          :terminated? terminated-1?}))
+  (def handlers-1 (chat-sse/make-stream-handlers
+                   {:emit! (:emit! callbacks-1)
+                    :complete! (:complete! callbacks-1)
+                    :error! (:error! callbacks-1)}))
+  (def consumed-1 (atom 0))
+  (def consumer-1
+    (async/thread
+      (loop []
+        (when-let [_event (async/<!! ch-1)]
+          (swap! consumed-1 inc)
+          (Thread/sleep 5)
+          (recur)))))
+  (def producer-1
+    (async/thread
+      (sse/consume-sse!
+       input-1
+       {:on-event (:on-event handlers-1)
+        :on-complete (:on-complete handlers-1)
+        :on-error (:on-error handlers-1)})))
+  (Thread/sleep 1000)
+  @consumed-1
+  @terminated-1?
 
-  ;; Force idle-timeout
-  (def result-9 (test-force-idle-timeout!))
-  (:reason (:data (:terminal-event result-9)))
+  ;; Example 2: Block mode immediate backpressure (:overflow-mode :block)
+  ;; No queue, producer blocks when channel full.
+  (def sse-data-2 (make-sse-sample 150))
+  (def input-2 (java.io.ByteArrayInputStream. (.getBytes sse-data-2 "UTF-8")))
+  (def ch-2 (async/chan 1))
+  (def terminated-2? (atom false))
+  (def callbacks-2 (emitter/make-channel-callbacks ch-2 {:overflow-max 50
+                                                          :overflow-mode :block
+                                                          :terminated? terminated-2?}))
+  (def handlers-2 (chat-sse/make-stream-handlers
+                   {:emit! (:emit! callbacks-2)
+                    :complete! (:complete! callbacks-2)
+                    :error! (:error! callbacks-2)}))
+  (def consumed-2 (atom 0))
+  (def consumer-2
+    (async/thread
+      (loop []
+        (when-let [_event (async/<!! ch-2)]
+          (swap! consumed-2 inc)
+          (Thread/sleep 5)
+          (recur)))))
+  (def producer-2
+    (async/thread
+      (sse/consume-sse!
+       input-2
+       {:on-event (:on-event handlers-2)
+        :on-complete (:on-complete handlers-2)
+        :on-error (:on-error handlers-2)})))
+  (Thread/sleep 1000)
+  @consumed-2
+  @terminated-2?
 
-  ;; No-timeout contrast
-  (def result-9b (test-no-timeout-contrast!))
-  (:reason (:data (:terminal-event result-9b))))
+  ;; ---------------------------------------------------------------------------
+  ;; Idle-timeout tests (require OPENAI_API_KEY and network)
+  ;; ---------------------------------------------------------------------------
+
+  ;; Example 3: Idle-timeout after initial progress
+  ;; Read one early chunk, then stop consuming to force channel stall and timeout.
+  (def ch-3 (async/chan 1))
+  (chat/start-request!
+   {:url openai-api-url
+    :api-key openai-api-key
+    :channel ch-3
+    :model "gpt-4o-mini"
+    :stream? true
+    :channel-idle-timeout-ms 1500
+    :messages [{:role "user"
+                :content "Write 1200 words about a library cat."}]})
+  (def first-3 (async/<!! ch-3))
+  (:event first-3)
+  (def event-3
+    (if (#{:complete :error} (:event first-3))
+      first-3
+      (do
+        (Thread/sleep 2500)
+        (await-terminal-event!! ch-3 10000))))
+  event-3
+  (:data event-3)
+  (:reason (:data event-3))
+
+  ;; Example 4: Idle-timeout without consuming
+  ;; Use an unbuffered channel so no consumer means zero progress from the start.
+  ;; After timeout elapses, first terminal read should be {:reason :timeout}.
+  (def ch-4 (async/chan))
+  (chat/start-request!
+   {:url openai-api-url
+    :api-key openai-api-key
+    :channel ch-4
+    :model "gpt-4o-mini"
+    :stream? true
+    :channel-idle-timeout-ms 1500
+    :messages [{:role "user"
+                :content "Write 1200 words about a library cat."}]})
+  (Thread/sleep 2500)
+  (def event-4 (await-terminal-event!! ch-4 10000))
+  event-4
+  (:data event-4)
+  (:reason (:data event-4))
+
+  ;; Example 5: Force idle-timeout by blocking the consumer
+  ;; The channel fills immediately, so no progress is recorded and timeout fires.
+  (def ch-5 (async/chan 1))
+  (chat/start-request!
+   {:url openai-api-url
+    :api-key openai-api-key
+    :channel ch-5
+    :model "gpt-4o-mini"
+    :stream? true
+    :channel-idle-timeout-ms 200
+    :messages [{:role "user"
+                :content "Write 1000 words about a library cat."}]})
+  (Thread/sleep 1000)
+  (def event-5 (async/<!! ch-5))
+  event-5
+  (:data event-5)
+  (:reason (:data event-5))
+
+  ;; Example 6: No-timeout contrast (:channel-idle-timeout-ms nil)
+  ;; Even with delayed consumption, terminal event should be normal completion, not :timeout.
+  (def ch-6 (async/chan 1))
+  (chat/start-request!
+   {:url openai-api-url
+    :api-key openai-api-key
+    :channel ch-6
+    :model "gpt-4o-mini"
+    :stream? true
+    :channel-idle-timeout-ms nil
+    :messages [{:role "user"
+                :content "Write 600 words about a library cat."}]})
+  (Thread/sleep 2000)
+  (def event-6 (await-terminal-event!! ch-6 30000))
+  event-6
+  (:data event-6)
+  (:reason (:data event-6))
+  )

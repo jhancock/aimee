@@ -41,6 +41,11 @@
   ;; ---------------------------------------------------------------------------
   ;; Streaming module walkthrough - explicit REPL steps
   ;; ---------------------------------------------------------------------------
+  ;;
+  ;; Demonstrates streaming chat completion with various options.
+  ;; For :reason values on :complete events, see aimee.example.api.
+  ;;
+  ;; ---------------------------------------------------------------------------
 
   ;; Network helpers for API-backed examples
   (def openai-api-url (or (System/getenv "OPENAI_API_URL")

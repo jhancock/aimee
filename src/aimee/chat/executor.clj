@@ -119,7 +119,7 @@
         (let [{:keys [content finish-reason role tool-calls function-call usage refusal refusal?]}
               (parser/parse-final-response (:body resp))]
           ((:complete! channel-callbacks)
-           (cond-> {:content content}
+           (cond-> {:content content :reason :done}
              finish-reason (assoc :finish-reason finish-reason)
              role (assoc :role role)
              tool-calls (assoc :tool-calls tool-calls)

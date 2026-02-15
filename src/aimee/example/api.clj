@@ -6,6 +6,19 @@
   ;; ---------------------------------------------------------------------------
   ;; API module walkthrough - explicit REPL steps
   ;; ---------------------------------------------------------------------------
+  ;;
+  ;; TERMINAL EVENT :reason VALUES
+  ;; ------------------------------
+  ;; Every :complete event includes a :reason key indicating how it terminated:
+  ;;
+  ;;   :done     - Normal completion (stream finished with [DONE] or non-streaming)
+  ;;   :stopped  - User called stop! to cancel the request
+  ;;   :timeout  - Channel idle timeout exceeded (no consumer progress)
+  ;;   :eof      - Stream ended unexpectedly without [DONE] sentinel
+  ;;
+  ;; :error events do not include :reason - the exception in :data describes the failure.
+  ;;
+  ;; ---------------------------------------------------------------------------
 
   ;; Network helpers for API-backed examples
   (def openai-api-url (or (System/getenv "OPENAI_API_URL")
