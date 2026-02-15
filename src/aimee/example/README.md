@@ -11,27 +11,31 @@ REPL-focused usage examples. Each module contains executable `(comment ...)` blo
 
 ## Terminal Event `:reason` Values
 
-| Reason | Meaning |
-|--------|---------|
-| `:done` | Normal completion |
-| `:stopped` | User called `stop!` |
-| `:timeout` | Channel idle timeout |
-| `:eof` | Stream ended without `[DONE]` |
+- **`:done`** — Normal completion
+- **`:stopped`** — User called `stop!`
+- **`:timeout`** — Channel idle timeout
+- **`:eof`** — Stream ended without `[DONE]`
 
 `:error` events do not include `:reason` — the exception is in `:data`.
 
 ## Module Index
 
-| Module | Network | Description |
-|--------|---------|-------------|
-| `api.clj` | Yes | Non-streaming calls, HTTP error handling |
-| `streaming.clj` | Yes | Streaming modes: standard, usage, raw, no-accumulate |
-| `control.clj` | Yes | Stop requests, IO exception simulation |
-| `backpressure.clj` | Mixed | Overflow modes, idle-timeout behavior |
-| `parsing.clj` | No | Chat SSE parsing: usage, refusal, parse errors |
-| `parser.clj` | No | Low-level SSE line parsing |
-| `lifecycle.clj` | No | Channel lifecycle, callbacks |
-| `scheduler.clj` | No | Timer scheduler, concurrent shutdown |
+**Network required:**
+
+- **`api.clj`** — Non-streaming calls, HTTP error handling
+- **`streaming.clj`** — Streaming modes: standard, usage, raw, no-accumulate
+- **`control.clj`** — Stop requests, IO exception simulation
+
+**Mixed (some network):**
+
+- **`backpressure.clj`** — Overflow modes, idle-timeout behavior
+
+**No network (local only):**
+
+- **`parsing.clj`** — Chat SSE parsing: usage, refusal, parse errors
+- **`parser.clj`** — Low-level SSE line parsing
+- **`lifecycle.clj`** — Channel lifecycle, callbacks
+- **`scheduler.clj`** — Timer scheduler, concurrent shutdown
 
 ## Environment
 

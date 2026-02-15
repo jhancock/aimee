@@ -1,16 +1,14 @@
 # aimee
 
-Core.async-first streaming client for LLM APIs.
+Core.async-first streaming client for OpenAI-compatible chat completions.
 
 ## Install
-
-Add to your deps.edn:
 
 ```edn
 {jhancock/aimee {:mvn/version "0.1.0-SNAPSHOT"}}
 ```
 
-## Usage
+## Quick Start
 
 ```clojure
 (require '[aimee.chat.client :as chat]
@@ -28,29 +26,19 @@ Add to your deps.edn:
 (async/go-loop []
   (when-let [event (async/<! ch)]
     (case (:event event)
-      :chunk (println "Chunk" (:content (:parsed (:data event))))
+      :chunk (println "Chunk" (get-in event [:data :parsed :content]))
       :complete (println "Done" (:data event))
       :error (println "Error" (:data event)))
-    (recur)))
+    (recur))
 
 ((:stop! result))
 ```
 
 ## Docs
 
-- `docs/overview.md`
-- `docs/api.md`
-- `docs/architecture.md`
-
-## Validation
-
-There is intentionally no standalone automated test command yet.
-
-Validation is REPL-first via executable `(comment ...)` blocks in:
-
-- `src/aimee/simulator.clj`
-- `src/aimee/stress.clj`
-- `src/aimee/scheduler_simulator.clj`
+- **[docs/api.md](docs/api.md)** — Options reference, event contract
+- **[docs/architecture.md](docs/architecture.md)** — Design principles, runtime flow
+- **[src/aimee/example/](src/aimee/example/)** — REPL examples
 
 ## Build
 
@@ -58,10 +46,12 @@ Validation is REPL-first via executable `(comment ...)` blocks in:
 clojure -T:build jar
 ```
 
-## Publish to Clojars
+## Publish
 
 ```sh
 clojure -T:build deploy
 ```
 
-Requires Clojars credentials in `~/.clojars` or environment variables.
+## Validation
+
+REPL-first via `(comment ...)` blocks in `src/aimee/example/`.

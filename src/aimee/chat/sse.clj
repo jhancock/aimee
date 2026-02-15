@@ -17,7 +17,7 @@
   - :error! - error callback
   - :stream - InputStream to close on completion/error
   - :parse-chunks? - true or false. When true, parse each chunk and include :parsed key
-                     with {:content, :finish-reason, :role, :tool-calls, :function-call, :done?}.
+                     with {:content, :api-finish-reason, :role, :tool-calls, :function-call, :done?}.
                      When false, chunks contain
                      only raw SSE data. (Normalized by validate-opts!)
   - :on-parse-error - :stop or :continue. When :stop, emit :error event and close stream on

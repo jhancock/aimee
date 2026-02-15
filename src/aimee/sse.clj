@@ -15,7 +15,7 @@
   (let [acc-map (if (map? acc) acc {:content (or acc "")})]
     (cond-> {:content (or (:content acc-map) "")
              :reason reason}
-      (:finish-reason acc-map) (assoc :finish-reason (:finish-reason acc-map))
+      (:api-finish-reason acc-map) (assoc :api-finish-reason (:api-finish-reason acc-map))
       (:role acc-map) (assoc :role (:role acc-map))
       (:tool-calls acc-map) (assoc :tool-calls (:tool-calls acc-map))
       (:function-call acc-map) (assoc :function-call (:function-call acc-map))
@@ -94,7 +94,7 @@
     (let [info (build-complete-info acc done-event reason)]
       {:info info
        :result {:content (:content info)
-                :finish-reason (:finish-reason info)
+                :api-finish-reason (:api-finish-reason info)
                 :reason reason}})))
 
 (defn consume-sse!
@@ -143,7 +143,7 @@
             (let [info (build-complete-info acc nil :stopped)]
               (complete! info)
               {:content (:content info)
-               :finish-reason (:finish-reason info)
+               :api-finish-reason (:api-finish-reason info)
                :reason :stopped})
             (let [read-result (read-sse-line reader)]
               (if-let [ex (:error read-result)]
@@ -152,13 +152,13 @@
                   (let [info (build-complete-info acc nil :stopped)]
                     (complete! info)
                     {:content (:content info)
-                     :finish-reason (:finish-reason info)
+                     :api-finish-reason (:api-finish-reason info)
                      :reason :stopped})
                   (do
                     (error! ex)
                     (let [info (build-complete-info acc nil :error)]
                       {:content (:content info)
-                       :finish-reason (:finish-reason info)
+                       :api-finish-reason (:api-finish-reason info)
                        :reason :error})))
                 (let [line (:line read-result)
                       last-lines (update-last-lines last-lines line)
@@ -188,7 +188,7 @@
         (error! ex)
         (let [info (build-complete-info initial-acc nil :error)]
           {:content (:content info)
-           :finish-reason (:finish-reason info)
+           :api-finish-reason (:api-finish-reason info)
            :reason :error}))
       (finally
         (when close-input?

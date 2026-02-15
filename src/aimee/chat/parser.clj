@@ -2,6 +2,16 @@
   (:require [cheshire.core :as json]
             [clojure.string :as str]))
 
+;; ---------------------------------------------------------------------------
+;; :api-finish-reason values (passthrough from OpenAI API)
+;; ---------------------------------------------------------------------------
+;; "stop"           - Model finished naturally
+;; "length"         - Hit max_tokens limit
+;; "content_filter" - Content policy violation
+;; "function_call"  - Model called a function (legacy)
+;; "tool_calls"     - Model requested tool calls
+;; ---------------------------------------------------------------------------
+
 (defn- parse-sse-payload
   [payload]
   (let [object (:object payload)]
@@ -15,15 +25,15 @@
             role (get delta :role)
             tool-calls (get delta :tool_calls)
             function-call (get delta :function_call)
-            finish-reason (get-in payload [:choices 0 :finish_reason])
+            api-finish-reason (get-in payload [:choices 0 :finish_reason])
             usage (:usage payload)
             base {:content content
                   :role role
                   :tool-calls tool-calls
                   :function-call function-call
-                  :finish-reason finish-reason
+                  :api-finish-reason api-finish-reason
                   :usage usage
-                  :done? (some? finish-reason)}]
+                  :done? (some? api-finish-reason)}]
         (cond-> base
           refusal? (assoc :refusal refusal
                           :refusal? true))))))
@@ -31,7 +41,7 @@
 (defn- parse-sse-data-with
   [data parse-payload-fn]
   (cond
-    (nil? data) {:content "" :finish-reason nil}
+    (nil? data) {:content "" :api-finish-reason nil}
     (= data "[DONE]") {:done? true}
     :else
     (parse-sse-payload (parse-payload-fn data))))
@@ -39,7 +49,7 @@
 (defn parse-sse-event
   "Parse OpenAI SSE event data.
 
-  Returns {:content :refusal :refusal? :finish-reason :done?}.
+  Returns {:content :refusal :refusal? :api-finish-reason :done?}.
   Returns {:done? true} for [DONE] sentinel.
   Returns {:skip? true} for non-chat.completion.chunk payloads.
 
@@ -56,7 +66,7 @@
 (defn parse-sse-event!
   "Parse OpenAI SSE event data, throwing on parse error.
 
-  Returns {:content :refusal :refusal? :finish-reason :done?}.
+  Returns {:content :refusal :refusal? :api-finish-reason :done?}.
   Returns {:done? true} for [DONE] sentinel.
   Returns {:skip? true} for non-chat.completion.chunk payloads.
   Throws Exception if JSON parsing fails.
@@ -69,7 +79,7 @@
 (defn parse-final-response
   "Parse a non-streaming chat response body.
 
-  Returns {:content :finish-reason :role :tool-calls :function-call :usage :refusal :refusal?}.
+  Returns {:content :api-finish-reason :role :tool-calls :function-call :usage :refusal :refusal?}.
   Refusal text is normalized into :content when content is blank.
   "
   [body]
@@ -82,7 +92,7 @@
               :role (get-in payload [:choices 0 :message :role])
               :tool-calls (get-in payload [:choices 0 :message :tool_calls])
               :function-call (get-in payload [:choices 0 :message :function_call])
-              :finish-reason (get-in payload [:choices 0 :finish_reason])
+              :api-finish-reason (get-in payload [:choices 0 :finish_reason])
               :usage (:usage payload)}]
     (cond-> base
       refusal? (assoc :refusal refusal
@@ -99,12 +109,12 @@
     (parse-sse-event (:data event))))
 
 (defn- merge-metadata
-  [acc-map {:keys [role tool-calls function-call finish-reason usage refusal refusal?]}]
+  [acc-map {:keys [role tool-calls function-call api-finish-reason usage refusal refusal?]}]
   (cond-> acc-map
     role (assoc :role role)
     tool-calls (assoc :tool-calls tool-calls)
     function-call (assoc :function-call function-call)
-    finish-reason (assoc :finish-reason finish-reason)
+    api-finish-reason (assoc :api-finish-reason api-finish-reason)
     usage (assoc :usage usage)
     refusal (update :refusal (fnil str "") refusal)
     refusal? (assoc :refusal? true)))

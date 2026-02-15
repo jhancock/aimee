@@ -116,11 +116,11 @@
     (let [resp (http/post url (assoc request-opts :as :string))
           status (:status resp)]
       (if (ok-status? status)
-        (let [{:keys [content finish-reason role tool-calls function-call usage refusal refusal?]}
+        (let [{:keys [content api-finish-reason role tool-calls function-call usage refusal refusal?]}
               (parser/parse-final-response (:body resp))]
           ((:complete! channel-callbacks)
            (cond-> {:content content :reason :done}
-             finish-reason (assoc :finish-reason finish-reason)
+             api-finish-reason (assoc :api-finish-reason api-finish-reason)
              role (assoc :role role)
              tool-calls (assoc :tool-calls tool-calls)
              function-call (assoc :function-call function-call)

@@ -35,7 +35,7 @@
   ;; - :api-key-fn (fn [_opts] "...")
   ;; - :headers {"Authorization" "Bearer ..."}
 
-  ;; Example 1: Non-streaming call using :api-key-fn
+  ;; Example 1: Non-streaming call using :api-key
   (def ch-1 (async/chan 1))
   (chat/start-request!
    {:url openai-api-url

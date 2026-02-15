@@ -1,154 +1,115 @@
 # API Reference
 
-## API surface and stability
+## API Surface
 
-Stable public API for application code:
+Public API:
 
 - `aimee.chat.client/start-request!`
-- `aimee.chat.options/defaults` (REPL discovery convenience)
-- `aimee.sse-helpers/format-sse-data`
-- `aimee.sse-helpers/format-sse-done`
-- `aimee.sse-helpers/event->simplified-sse`
+- `aimee.chat.options/defaults`
+- `aimee.sse-helpers/format-sse-data`, `format-sse-done`, `event->simplified-sse`
 
-Development helpers (not stability-guaranteed):
+REPL walk through:
 
-- `aimee.simulator/*`
-- `aimee.stress/*`
-- `aimee.scheduler-simulator/*`
+- `src/aimee/example/*` — REPL examples
 
-All other vars and namespaces should be treated as internal implementation details and may change without notice.
+All other namespaces are internal implementation.
 
-## Entry point
-
-`aimee.chat.client/start-request!`
+## Entry Point
 
 ```clojure
-(start-request! opts)
+(aimee.chat.client/start-request! opts)
+;; => {:stop! (fn [])}
 ```
 
-Starts one chat completion request and returns:
+Calling `:stop!` cancels the request and emits `:complete` with `:reason :stopped`.
 
-```clojure
-{:stop! (fn [])}
-```
+## Required Options
 
-Calling `:stop!` requests termination and closes the active stream if present.
+- **`:channel`** — Caller-created `core.async` channel
+- **`:url`** — OpenAI-compatible endpoint
+- **`:model`** — Model ID string
+- **`:messages`** — Non-empty sequence of chat messages
+- **API credentials** — One of: `:api-key`, `:api-key-fn`, `:headers` with Authorization
 
-## Required options
+## Optional Options
 
-- `:channel` caller-created `core.async` channel
-- `:url` OpenAI-compatible chat completions endpoint
-- `:model` model id string
-- `:messages` non-empty sequence of chat messages
-- API credentials via one of:
-  - `:api-key`
-  - `:api-key-fn` (resolver function)
-  - `:headers` containing `Authorization`
-  - environment variable named by `:api-key-env` (default `OPENAI_API_KEY`)
+- **`:stream?`** — `false` — Enable streaming
+- **`:api-key`** — `nil` — API key string
+- **`:api-key-fn`** — `nil` — Function returning API key
+- **`:api-key-env`** — `"OPENAI_API_KEY"` — Env var name for key
+- **`:parse-chunks?`** — `true` — Include `:parsed` in chunks
+- **`:accumulate?`** — `true` — Accumulate content in `:complete`
+- **`:on-parse-error`** — `:stop` — `:stop` or `:continue`
+- **`:overflow-max`** — `10000` — Max queued events
+- **`:overflow-mode`** — `:queue` — `:queue` or `:block`
+- **`:channel-idle-timeout-ms`** — `nil` — Idle timeout
+- **`:http-timeout-ms`** — `nil` — HTTP timeout
+- **`:headers`** — `nil` — Extra headers
+- **`:include-usage?`** — `false` — Include usage in streaming
 
-## Optional options
+## Event Contract
 
-- `:stream?` default `false`
-- `:api-key` default `nil` (resolved from `:api-key-fn` / env when omitted)
-- `:api-key-fn` default `nil` (called with opts map when arity supports it, otherwise 0-arity)
-- `:api-key-env` default `"OPENAI_API_KEY"`
-- `:parse-chunks?` default `true`
-- `:accumulate?` default `true`
-- `:on-parse-error` `:stop` (default) or `:continue`
-- `:overflow-max` default `10000`
-- `:overflow-mode` `:queue` (default) or `:block`
-- `:channel-idle-timeout-ms` default `nil`
-- `:http-timeout-ms` default `nil`
-- `:headers` default `nil`
-- `:include-usage?` default `false` (streaming requests)
-- `:choices-n` fixed to `1` (validated)
-
-## Event contract
-
-Events are pushed to `:channel` as:
-
-```clojure
-{:event <keyword>
- :data  <payload>}
-```
+All events have shape `{:event <keyword> :data <payload>}`.
 
 ### `:chunk`
 
-`(:data event)` is the raw parsed SSE event map:
+Streaming content delta.
 
 ```clojure
-{:id "..."
- :type "..."
- :data "{...json...}"
- :parsed {...}} ; present when :parse-chunks? true
+{:event :chunk
+ :data {:id "..." :type "..." :data "{...}" :parsed {...}}}
 ```
 
-`(:parsed (:data event))` may include:
+`(:parsed (:data event))` includes:
 
-- `:content`
-- `:role`
-- `:tool-calls`
-- `:function-call`
-- `:finish-reason`
-- `:usage`
-- `:refusal`
-- `:refusal?`
-- `:done?`
-- `:skip?`
+- **`:content`** — Delta text
+- **`:role`** — Role string
+- **`:tool-calls`** — Tool definitions
+- **`:api-finish-reason`** — `"stop"`, `"length"`, `"content_filter"`, `"tool_calls"`
+- **`:usage`** — Token counts
+- **`:done?`** — Terminal chunk flag
 
 ### `:complete`
 
-`(:data event)` includes at least:
+Request finished.
 
 ```clojure
-{:content "..."}
+{:event :complete
+ :data {:content "..." :reason :done :api-finish-reason "stop" ...}}
 ```
 
-It may also include:
-
-- `:finish-reason`
-- `:role`
-- `:tool-calls`
-- `:function-call`
-- `:usage`
-- `:refusal`
-- `:refusal?`
-- `:done-event`
-- `:reason` (`:stopped`, `:timeout`, `:eof`, `:error`)
+- **`:content`** — Accumulated text
+- **`:reason`** — `:done`, `:stopped`, `:timeout`, `:eof`
+- **`:api-finish-reason`** — Passthrough from OpenAI
+- **`:role`, `:tool-calls`, `:usage`, `:refusal`, `:refusal?`** — As returned by API
 
 ### `:error`
 
-`(:data event)` is an exception (`ex-info` for structured cases).
+Request failed. `:data` is an exception.
 
-## Streaming behavior notes
+## Streaming Behavior
 
-- `:parse-chunks? false` keeps chunk payloads raw (no `:parsed`).
-- `:accumulate? false` disables content accumulation in `:complete`.
-- `:on-parse-error :stop` emits `:error` and closes.
-- `:on-parse-error :continue` logs and skips malformed chunks.
+- **`:parse-chunks? false`** — No `:parsed` key in chunks
+- **`:accumulate? false`** — No content accumulation
+- **`:on-parse-error :stop`** — Emit `:error`, close stream
+- **`:on-parse-error :continue`** — Log warning, skip chunk
 
-## Backpressure behavior
+## Backpressure
 
-- `:overflow-mode :queue` lazily creates a bounded overflow queue (`:overflow-max`).
-- `:overflow-mode :block` immediately blocks producer writes on full channel.
+- **`:queue`** — Lazy overflow queue up to `:overflow-max`
+- **`:block`** — Block producer on full channel
 
-## Idle timeout behavior
+## Idle Timeout
 
-When `:channel-idle-timeout-ms` is set, timeout checks run periodically. If no progress is emitted to the channel within the window:
+When `:channel-idle-timeout-ms` is set and no progress for that duration:
 
-- a `:complete` event is emitted with `{:reason :timeout}`
-- the stream is stopped/closed
+- Emits `:complete` with `:reason :timeout`
+- Closes stream
 
-## Non-streaming behavior
+## SSE Helpers
 
-For `:stream? false`, a single HTTP response is parsed and emitted as `:complete`, or `:error` for non-2xx.
+`aimee.sse-helpers` provides utilities for browser-friendly SSE:
 
-## Helper namespace
-
-`aimee.sse-helpers`
-
-- `format-sse-data`
-- `format-sse-done`
-- `event->simplified-sse`
-
-These are utility functions for adapting channel events to browser-friendly SSE output.
+- `format-sse-data` — Format data as SSE
+- `format-sse-done` — Format `[DONE]` sentinel
+- `event->simplified-sse` — Convert event to SSE string

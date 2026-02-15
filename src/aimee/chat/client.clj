@@ -30,13 +30,13 @@
 
   Streaming behavior opts (when :stream? true):
   - :parse-chunks? (default true) - When true, each :chunk event includes :parsed key
-                    with {:content, :finish-reason, :role, :tool-calls, :function-call, :done?}.
+                    with {:content, :api-finish-reason, :role, :tool-calls, :function-call, :done?}.
                     When false, chunks contain
                     only raw SSE data without :parsed.
   - :accumulate? (default true) - When true, accumulates content to build :content
                    in :complete event. Uses :parsed when available, otherwise parses
                    from raw :data. When false, skips content accumulation and :content is empty
-                   (metadata like :finish-reason is still captured when :parse-chunks? is true).
+                   (metadata like :api-finish-reason is still captured when :parse-chunks? is true).
   - :on-parse-error (default :stop) - When :stop, emit :error event and close stream on
                         parse failure. When :continue, log warning and skip bad chunk.
 
