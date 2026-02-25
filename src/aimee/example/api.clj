@@ -41,23 +41,23 @@
    {:url openai-api-url
     :api-key openai-api-key
     :channel ch-1
-    :model "gpt-4o-mini"
+    :model "gpt-5-mini"
     :stream? false
-    :messages [{:role "user" :content "Say auth fn works."}]})
-  (def event-1 (async/<!! ch-1))
+    :messages [{:role "user" :content "Count to 5."}]})
+  (def event-1 (async/<!! ch-1)) 
   event-1
   (:event event-1)
   (get-in event-1 [:data :content])
 
-  ;; Example 2: Non-streaming call using :api-key
+  ;; Example 2: Non-streaming call using :api-key-fn
   (def ch-2 (async/chan 1))
   (chat/start-request!
    {:url openai-api-url
-    :api-key openai-api-key
+    :api-key-fn (fn [_opts] openai-api-key)
     :channel ch-2
-    :model "gpt-4o-mini"
+    :model "gpt-5-mini"
     :stream? false
-    :messages [{:role "user" :content "Count to 5."}]})
+    :messages [{:role "user" :content "Count to 5 backwards."}]})
   (def event-2 (async/<!! ch-2))
   event-2
   (:event event-2)
@@ -66,10 +66,10 @@
   ;; Example 3: HTTP error flow (non-2xx response)
   (def ch-3 (async/chan 1))
   (chat/start-request!
-   {:url "https://httpbin.org/status/401"
+   {:url openai-api-url
     :api-key "invalid-key"
     :channel ch-3
-    :model "gpt-4o-mini"
+    :model "gpt-5-mini"
     :stream? false
     :messages [{:role "user" :content "This will not succeed."}]})
   (def event-3 (async/<!! ch-3))

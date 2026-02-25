@@ -134,7 +134,7 @@
    {:url openai-api-url
     :api-key openai-api-key
     :channel ch-3
-    :model "gpt-4o-mini"
+    :model "gpt-5-mini"
     :stream? true
     :channel-idle-timeout-ms 1500
     :messages [{:role "user"
@@ -159,7 +159,7 @@
    {:url openai-api-url
     :api-key openai-api-key
     :channel ch-4
-    :model "gpt-4o-mini"
+    :model "gpt-5-mini"
     :stream? true
     :channel-idle-timeout-ms 1500
     :messages [{:role "user"
@@ -177,7 +177,7 @@
    {:url openai-api-url
     :api-key openai-api-key
     :channel ch-5
-    :model "gpt-4o-mini"
+    :model "gpt-5-mini"
     :stream? true
     :channel-idle-timeout-ms 200
     :messages [{:role "user"
@@ -195,7 +195,7 @@
    {:url openai-api-url
     :api-key openai-api-key
     :channel ch-6
-    :model "gpt-4o-mini"
+    :model "gpt-5-mini"
     :stream? true
     :channel-idle-timeout-ms nil
     :messages [{:role "user"

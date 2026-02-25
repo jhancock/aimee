@@ -12,34 +12,71 @@
   so a basic consumer can display a single text field.
   "
   []
-  {:stream? false
-   ;; When true, SSE streaming is used for the response.
+  {;; When true, the response is streamed via SSE. Each :chunk event contains a
+   ;; delta of the response as it arrives. When false, the full response is
+   ;; returned in a single :complete event.
+   :stream? false
+
+   ;; When true, each :chunk event includes a :parsed key with decoded JSON
+   ;; fields (:content, :tool-calls, :api-finish-reason, etc.). When false,
+   ;; chunks contain only raw unparsed SSE data.
    :parse-chunks? true
-   ;; When true, parsed chunk data is attached to each event.
+
+   ;; When true, text from all chunks is concatenated and included in the
+   ;; :complete event's :content field. Useful when you want the full response
+   ;; text without manually accumulating chunks.
    :accumulate? true
-   ;; When true, chunk text is accumulated into :complete content.
+
+   ;; How to handle JSON parse failures during streaming:
+   ;;   :stop     — emit an :error event and close the stream
+   ;;   :continue — log a warning and skip the malformed chunk
    :on-parse-error :stop
-   ;; :stop -> error and close; :continue -> warn and skip bad chunk.
-   :overflow-max 10000
-   ;; Maximum queued events before backpressure/overflow handling.
+
+   ;; Backpressure strategy when the channel cannot accept events:
+   ;;   :queue — create an overflow buffer (up to :overflow-max) and drain
+   ;;            in a background thread; preserves events until consumer catches up.
+   ;;   :block — block the producer thread until the channel has capacity;
+   ;;            simpler but may stall the SSE stream since it's connected to the HTTP request thread
    :overflow-mode :queue
-   ;; :queue buffers events; :block blocks immediately on channel.
+
+   ;; Maximum number of events to buffer when the consumer is slow. Once
+   ;; exceeded, backpressure is applied according to :overflow-mode.
+   :overflow-max 1000
+
+   ;; Milliseconds to wait for the consumer to accept an event before aborting.
+   ;; This protects against slow or blocked consumers: if no event is
+   ;; successfully written to the channel for this duration, emits :complete
+   ;; with :reason :timeout and closes the stream.
+   ;;
+   ;; Progress is recorded only when the consumer takes an event...adding to
+   ;; the overflow queue does not count. The check runs via aimee.scheduler
+   ;; (a shared daemon thread) which auto-shuts down after 60 seconds of
+   ;; inactivity. When nil, no idle timeout is applied.
    :channel-idle-timeout-ms nil
-   ;; Nil disables the idle timeout (scheduler). When set, abort if no events are
-   ;; successfully emitted to the channel for this duration.
-   ;; Note: enqueuing into the overflow buffer does not count as progress.
+
+   ;; Milliseconds to wait for the HTTP response before aborting. This is the
+   ;; standard HTTP client timeout for the initial connection and response,
+   ;; distinct from the streaming duration. When nil, the HTTP client uses
+   ;; its default behavior.
    :http-timeout-ms nil
-   ;; HTTP request timeout (ms). Nil means no explicit timeout set.
+
+   ;; Additional HTTP headers to include in the request. Merged with the
+   ;; default Content-Type and Authorization headers.
    :headers nil
-   ;; Additional HTTP headers to merge into the request.
+
+   ;; When true (and :stream? is true), requests that the API include token
+   ;; usage statistics in the final streaming chunk. Usage is automatically
+   ;; included when :stream? is false.
    :include-usage? false
-   ;; When true (and :stream? true), request final usage stats in :complete. Commonly, usage data comes though when :stream? is false without setting this option
+
+   ;; Number of completion choices to request. 
+   ;; The chat completions protocol allows more than 1 choice. Currently fixed at 1. 
    :choices-n 1
-   ;; Chat completions are fixed to a single choice (choices-n=1).
-   :max-data-lines 1000
-   ;; Maximum data lines per SSE event before forcing flush. Prevents unbounded
-   ;; memory growth from malformed/malicious input.
-   })
+
+   ;; Maximum data lines to accept in a single SSE event before forcing
+   ;; a flush. Protects against unbounded memory growth from malformed
+   ;; or malicious input.
+   :max-data-lines 1000})
 
 (defn- non-blank-string?
   [value]

@@ -51,7 +51,7 @@
                       {:url openai-api-url
                        :api-key openai-api-key
                        :channel ch-stop-1
-                       :model "gpt-4o-mini"
+                       :model "gpt-5-mini"
                        :stream? true
                        :messages [{:role "user"
                                    :content "Write 2000 words about a library cat."}]}))
@@ -67,7 +67,7 @@
                       {:url openai-api-url
                        :api-key openai-api-key
                        :channel ch-stop-2
-                       :model "gpt-4o-mini"
+                       :model "gpt-5-mini"
                        :stream? true
                        :messages [{:role "user"
                                    :content "Write 500 words about a library cat."}]}))

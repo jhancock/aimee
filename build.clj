@@ -18,9 +18,7 @@
   (b/copy-dir {:src-dirs ["src"]
                :target-dir class-dir
                ;; Keep the library lean; we can expand this list as the repo evolves.
-               :exclude [#"aimee/simulator.*"
-                         #"aimee/stress.*"
-                         #"aimee/scheduler_simulator.*"]})
+               :exclude [#"aimee/example.*"]})
   (b/write-pom {:class-dir class-dir
                 :lib lib
                 :version version

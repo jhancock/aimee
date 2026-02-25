@@ -13,26 +13,26 @@
   [ch]
   (loop []
     (if-let [event (async/<!! ch)]
-      (cond
-        (= :chunk (:event event))
-        (do
-          (log/info "stream chunk event" event)
-          (recur))
+      (let [event-type (:event event)]
+        (case event-type
+          :chunk
+          (do
+            (log/info "stream chunk event" event)
+            (recur))
 
-        (= :complete (:event event))
-        (do
-          (log/info "stream complete event" event)
-          event)
+          :complete
+          (do
+            (log/info "complete event" event)
+            event)
 
-        (= :error (:event event))
-        (do
-          (log/error "stream error event" event)
-          event)
+          :error
+          (do
+            (log/error "error event" event)
+            event)
 
-        :else
-        (do
-          (log/warn "stream unknown event" event)
-          (recur)))
+          (do
+            (log/warn "unknown event" event)
+            (recur))))
       (do
         (log/info "stream channel closed")
         nil))))
@@ -68,7 +68,7 @@
    {:url openai-api-url
     :api-key openai-api-key
     :channel ch-1
-    :model "gpt-4o-mini"
+    :model "gpt-5-mini"
     :stream? true
     :messages [{:role "user" :content "Say hello in exactly two sentences."}]})
   ;; Logs each event as it arrives.
@@ -82,7 +82,7 @@
    {:url openai-api-url
     :api-key openai-api-key
     :channel ch-2
-    :model "gpt-4o-mini"
+    :model "gpt-5-mini"
     :stream? true
     :include-usage? true
     :messages [{:role "user" :content "Count to 3."}]})
@@ -96,7 +96,7 @@
    {:url openai-api-url
     :api-key openai-api-key
     :channel ch-3
-    :model "gpt-4o-mini"
+    :model "gpt-5-mini"
     :stream? true
     :parse-chunks? false
     :accumulate? false
@@ -111,7 +111,7 @@
    {:url openai-api-url
     :api-key openai-api-key
     :channel ch-4
-    :model "gpt-4o-mini"
+    :model "gpt-5-mini"
     :stream? true
     :accumulate? false
     :messages [{:role "user" :content "Count from 1 to 3."}]})
