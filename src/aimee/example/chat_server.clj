@@ -7,7 +7,7 @@
    3. Read events from event-channel, format as SSE, write to frame-channel
    4. Return frame-channel as the HTTP response body (Jetty streams it to client)
 
-   Run: clojure -M -m aimee.example.chat-server
+   Run: clojure -M:chat-server -m aimee.example.chat-server
    REPL: (start-server!) (stop-server!)
    Test: curl -X POST http://localhost:8080/chat -H 'Content-Type: application/json' -d '{\"messages\":[{\"role\":\"user\",\"text\":\"hello\"}]}'
   "
@@ -18,12 +18,12 @@
             [clojure.java.io :as io]
             [ring.adapter.jetty9 :as jetty]
             [ring.core.protocols :as protocols])
-  (:import (clojure.core.async.impl.channels ManyToManyChannel)))
+  (:import (clojure.core.async.impl.channels ManyToManyChannel)
+           (org.eclipse.jetty.util.thread QueuedThreadPool)
+           (java.util.concurrent Executors)))
 
 (defonce server* (atom nil))
 
-;; Step 1: Tell Ring/Jetty how to stream a core.async channel to the HTTP response.
-;; When the response body is a ManyToManyChannel, this writes each frame to the output.
 (extend-protocol protocols/StreamableResponseBody
   ManyToManyChannel
   (write-body-to-stream [ch _response output-stream]
@@ -34,8 +34,6 @@
           (.flush writer)
           (recur))))))
 
-;; Step 2: Convert incoming HTTP request body to a user message string.
-;; This handles Deep Chat format: {\"messages\": [{\"role\": \"user\", \"text\": \"...\"}]}
 (defn- extract-user-message
   [request]
   (let [body (slurp (:body request))]
@@ -44,32 +42,24 @@
       (let [payload (json/parse-string body true)]
         (or (->> (:messages payload)
                  (filter #(= "user" (:role %)))
-                 (map #(:text %))
+                 (map :text)
                  last)
             "")))))
 
-;; Step 3: Build options map for chat/start-request!
-;; The :channel key is where Aimee will write events.
 (defn- make-chat-opts
   [user-message event-channel]
   {:url (or (System/getenv "OPENAI_API_URL")
             "https://api.openai.com/v1/chat/completions")
    :api-key (System/getenv "OPENAI_API_KEY")
-   :model "gpt-4o-mini"
+   :model "gpt-5-mini"
    :stream? true
    :channel event-channel
    :messages [{:role "user" :content user-message}]})
 
-;; Step 4: Start a background thread that:
-;;   - Calls chat/start-request! to begin the OpenAI stream
-;;   - Reads events from event-channel
-;;   - Formats each event as SSE and writes to frame-channel
-;;   - Closes frame-channel when done
 (defn- start-chat-stream!
   [user-message frame-channel]
   (async/thread
     (try
-      (async/>!! frame-channel ": stream-open\n\n")
       (if (empty? user-message)
         (do
           (async/>!! frame-channel (sse-helpers/format-sse-data {:text "Error: No message provided"}))
@@ -93,7 +83,6 @@
       (finally
         (async/close! frame-channel)))))
 
-;; Step 5: HTTP handler - creates frame-channel, starts stream, returns SSE response
 (defn- handle-chat
   [request]
   (let [frame-channel (async/chan 256)
@@ -104,11 +93,51 @@
                "cache-control" "no-cache"}
      :body frame-channel}))
 
+(def ^:private chat-page-html
+  "<!DOCTYPE html>
+<html lang='en'>
+<head>
+  <meta charset='UTF-8'>
+  <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+  <title>Aimee Chat</title>
+  <script type='module' src='https://unpkg.com/deep-chat@2.4.2/dist/deepChat.bundle.js'></script>
+  <style>
+    body { margin: 0; padding: 20px; font-family: system-ui; background: #f5f5f5; }
+    .container { max-width: 800px; margin: 0 auto; }
+    h1 { color: #333; margin-bottom: 20px; }
+    deep-chat { width: 100%; height: 70vh; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+  </style>
+</head>
+<body>
+  <div class='container'>
+    <h1>Aimee Chat</h1>
+    <deep-chat id='chat'></deep-chat>
+  <script>
+    const el = document.getElementById('chat');
+    el.demo = false;
+    el.request = {url: '/chat', stream: true};
+    el.introMessage = {text: 'Hello! Ask me anything.'};
+    el.textInput = {placeholder: {text: 'Type a message...'}};
+  </script>
+    </deep-chat>
+  </div>
+</body>
+</html>")
+
 (defn app
   ([request]
-   (if (and (= :post (:request-method request))
-            (= "/chat" (:uri request)))
+   (cond
+     (and (= :get (:request-method request))
+          (= "/chat" (:uri request)))
+     {:status 200
+      :headers {"content-type" "text/html; charset=utf-8"}
+      :body chat-page-html}
+
+     (and (= :post (:request-method request))
+          (= "/chat" (:uri request)))
      (handle-chat request)
+
+     :else
      {:status 404 :body "Not found"}))
   ([request respond _raise]
    (respond (app request))))
@@ -124,10 +153,16 @@
   ([] (start-server! 8080))
   ([port]
    (stop-server!)
-   (let [server (jetty/run-jetty #'app {:port port :join? false :async? true})]
-     (reset! server* server)
-     (println "Server running on http://localhost:" port "/chat")
-     server)))
+   (let [thread-pool (QueuedThreadPool.)]
+     (.setVirtualThreadsExecutor thread-pool (Executors/newVirtualThreadPerTaskExecutor))
+     (let [server (jetty/run-jetty #'app
+                                   {:port port
+                                    :thread-pool thread-pool
+                                    :join? false
+                                    :send-server-version? false})]
+       (reset! server* server)
+       (println (str "Server running on http://localhost:" port "/chat"))
+       server))))
 
 (defn -main
   [& _]
