@@ -21,7 +21,8 @@
             [compojure.route :as route]
             [hiccup2.core :as h]
             [ring.adapter.jetty9 :as jetty]
-            [ring.core.protocols :as protocols])
+            [ring.core.protocols :as protocols]
+            [aimee.pp :refer [pprint]])
   (:import (clojure.core.async.impl.channels ManyToManyChannel)
            (org.eclipse.jetty.util.thread QueuedThreadPool)
            (java.util.concurrent Executors)))
@@ -57,12 +58,16 @@
   (let [body (slurp (:body request))]
     (if (empty? body)
       ""
-      (let [payload (json/parse-string body true)]
-        (or (->> (:messages payload)
-                 (filter #(= "user" (:role %)))
-                 (map :text)
-                 last)
-            "")))))
+      (try
+        (let [payload (json/parse-string body true)]
+          (or (->> (:messages payload)
+                   (filter #(= "user" (:role %)))
+                   (map :text)
+                   last)
+              ""))
+        (catch Exception e
+          (log/error e "Failed to parse JSON body")
+          "")))))
 
 (defn- make-chat-opts
   [user-message event-channel]
@@ -109,8 +114,10 @@ customElements.whenDefined('deep-chat').then(() => {
 
 (defn- handle-chat-stream
   [request]
-  (let [event-channel (async/chan 128)
-        user-message (extract-user-message request)]
+  (let [body (slurp (:body request))]
+    (log/info "Deep Chat request body:" body)
+    (let [event-channel (async/chan 128)
+          user-message (extract-user-message {:body (java.io.ByteArrayInputStream. (.getBytes body))})]
     (if (empty? user-message)
       (do
         (async/>!! event-channel {:event :error :data "No message provided"})
@@ -119,7 +126,7 @@ customElements.whenDefined('deep-chat').then(() => {
     {:status 200
      :headers {"content-type" "text/event-stream; charset=utf-8"
                "cache-control" "no-cache"}
-     :body event-channel}))
+     :body event-channel})))
 
 (defn- handle-simple-stream
   [request]

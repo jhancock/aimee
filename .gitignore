@@ -1,3 +1,5 @@
+.gitignore
+.DS_Store
 .calva/output-window/
 .calva/repl.calva-repl
 .classpath

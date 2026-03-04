@@ -9,12 +9,16 @@
  {:build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.12"}
                  io.github.slipset/deps-deploy {:mvn/version "0.2.2"}}
           :ns-default build}
-  :chat-server {:extra-deps {ring/ring-core {:mvn/version "1.15.3"}
-                             info.sunng/ring-jetty9-adapter {:mvn/version "0.39.1"}
-                             compojure/compojure {:mvn/version "1.7.2"}
-                             hiccup/hiccup {:mvn/version "2.0.0"}}
-                :main-opts ["-m" "aimee.example.chat-server"]}
+  :dev {:extra-paths ["test"]
+        :extra-deps {ring/ring-core {:mvn/version "1.15.3"}
+                     info.sunng/ring-jetty9-adapter {:mvn/version "0.39.1"}
+                     compojure/compojure {:mvn/version "1.7.2"}
+                     hiccup/hiccup {:mvn/version "2.0.0"}}}
   :nrepl {:extra-paths ["test"]
-          :extra-deps {nrepl/nrepl {:mvn/version "1.6.0-alpha2"}}
+          :extra-deps {nrepl/nrepl {:mvn/version "1.6.0-alpha2"}
+                       ring/ring-core {:mvn/version "1.15.3"}
+                       info.sunng/ring-jetty9-adapter {:mvn/version "0.39.1"}
+                       compojure/compojure {:mvn/version "1.7.2"}
+                       hiccup/hiccup {:mvn/version "2.0.0"}}
           :jvm-opts ["-Djdk.attach.allowAttachSelf"]
           :main-opts ["-m" "nrepl.cmdline" "--port" "7888"]}}}
