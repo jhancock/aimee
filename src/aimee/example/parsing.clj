@@ -30,7 +30,6 @@
       :complete! (fn [info] (reset! final-info-1 info))
       :error! (fn [ex] (swap! seen-events-1 conj {:event :error :data ex}))
       :stream nil
-      :parse-chunks? true
       :on-parse-error :stop}))
   (sse/consume-sse!
    input-1
@@ -58,7 +57,6 @@
       :complete! (fn [info] (reset! usage-final-2 info))
       :error! (fn [ex] (reset! usage-final-2 {:error ex}))
       :stream nil
-      :parse-chunks? true
       :on-parse-error :stop}))
   (sse/consume-sse!
    input-2
@@ -84,7 +82,6 @@
       :complete! (fn [info] (reset! refusal-final-3 info))
       :error! (fn [ex] (reset! refusal-final-3 {:error ex}))
       :stream nil
-      :parse-chunks? true
       :on-parse-error :stop}))
   (sse/consume-sse!
    input-3
@@ -112,7 +109,6 @@
       :complete! (fn [info] (reset! bad-stop-complete-4 info))
       :error! (fn [ex] (swap! bad-stop-events-4 conj {:event :error :data ex}))
       :stream nil
-      :parse-chunks? true
       :on-parse-error :stop}))
   (sse/consume-sse!
    input-4
@@ -142,7 +138,6 @@
       :complete! (fn [info] (reset! bad-continue-complete-5 info))
       :error! (fn [ex] (swap! bad-continue-events-5 conj {:event :error :data ex}))
       :stream nil
-      :parse-chunks? true
       :on-parse-error :continue}))
   (sse/consume-sse!
    input-5
@@ -156,8 +151,8 @@
   (count (filter #(= :chunk (:event %)) @bad-continue-events-5))
   (:content @bad-continue-complete-5)
 
-  ;; Example 6: Local SSE parse-chunks option toggle (true)
-  ;; When :parse-chunks? is true, chunk event payloads include :parsed.
+  ;; Example 6: Chunk events include :parsed data
+  ;; All chunk event payloads now include :parsed with decoded fields.
   (def sse-data-6
     (str
      "data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"A\"}}]}\n\n"
@@ -172,7 +167,6 @@
       :complete! (fn [info] (reset! final-info-6 info))
       :error! (fn [ex] (swap! seen-events-6 conj {:event :error :data ex}))
       :stream nil
-      :parse-chunks? true
       :on-parse-error :stop}))
   (sse/consume-sse!
    input-6
@@ -184,8 +178,8 @@
   (def chunk-6 (first (filter #(= :chunk (:event %)) @seen-events-6)))
   (contains? (:data chunk-6) :parsed)
 
-  ;; Example 7: Local SSE parse-chunks option toggle (false)
-  ;; When :parse-chunks? is false, chunk events include raw SSE data only.
+  ;; Example 7: Local SSE accumulate option toggle (true)
+  ;; When :accumulate? is true, final :complete content contains full text.
   (def sse-data-7
     (str
      "data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"A\"}}]}\n\n"
@@ -200,7 +194,6 @@
       :complete! (fn [info] (reset! final-info-7 info))
       :error! (fn [ex] (swap! seen-events-7 conj {:event :error :data ex}))
       :stream nil
-      :parse-chunks? false
       :on-parse-error :stop}))
   (sse/consume-sse!
    input-7
@@ -209,11 +202,10 @@
     :on-event (:on-event handlers-7)
     :on-complete (:on-complete handlers-7)
     :on-error (:on-error handlers-7)})
-  (def chunk-7 (first (filter #(= :chunk (:event %)) @seen-events-7)))
-  (contains? (:data chunk-7) :parsed)
+  (:content @final-info-7)
 
-  ;; Example 8: Local SSE accumulate option toggle (true)
-  ;; When :accumulate? is true, final :complete content contains full text.
+  ;; Example 8: Local SSE accumulate option toggle (false)
+  ;; When :accumulate? is false, final :complete content remains empty.
   (def sse-data-8
     (str
      "data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"A\"}}]}\n\n"
@@ -228,41 +220,13 @@
       :complete! (fn [info] (reset! final-info-8 info))
       :error! (fn [ex] (swap! seen-events-8 conj {:event :error :data ex}))
       :stream nil
-      :parse-chunks? true
       :on-parse-error :stop}))
   (sse/consume-sse!
    input-8
-   {:accumulator parser/accumulate-content
+   {:accumulator nil
     :initial-acc {:content ""}
     :on-event (:on-event handlers-8)
     :on-complete (:on-complete handlers-8)
     :on-error (:on-error handlers-8)})
   (:content @final-info-8)
-
-  ;; Example 9: Local SSE accumulate option toggle (false)
-  ;; When :accumulate? is false, final :complete content remains empty.
-  (def sse-data-9
-    (str
-     "data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"A\"}}]}\n\n"
-     "data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"B\"}}]}\n\n"
-     "data: [DONE]\n\n"))
-  (def input-9 (java.io.ByteArrayInputStream. (.getBytes sse-data-9 "UTF-8")))
-  (def seen-events-9 (atom []))
-  (def final-info-9 (atom nil))
-  (def handlers-9
-    (chat-sse/make-stream-handlers
-     {:emit! (fn [event _] (swap! seen-events-9 conj event))
-      :complete! (fn [info] (reset! final-info-9 info))
-      :error! (fn [ex] (swap! seen-events-9 conj {:event :error :data ex}))
-      :stream nil
-      :parse-chunks? true
-      :on-parse-error :stop}))
-  (sse/consume-sse!
-   input-9
-   {:accumulator nil
-    :initial-acc {:content ""}
-    :on-event (:on-event handlers-9)
-    :on-complete (:on-complete handlers-9)
-    :on-error (:on-error handlers-9)})
-  (:content @final-info-9)
   )

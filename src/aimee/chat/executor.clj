@@ -53,11 +53,11 @@
 (defn streaming
   "Execute a streaming chat completion request.
 
-  Passes through streaming behavior opts (:parse-chunks?, :accumulate?, :on-parse-error)
-  to the SSE consumer.
-  "
+   Passes through streaming behavior opts (:accumulate?, :on-parse-error)
+   to the SSE consumer.
+   "
   [opts stop? stream-ref channel-callbacks]
-  (let [{:keys [url api-key headers http-timeout-ms channel on-parse-error parse-chunks? accumulate?]} opts
+  (let [{:keys [url api-key headers http-timeout-ms channel on-parse-error accumulate?]} opts
         body (build-body opts)
         request-opts (build-request-opts
                       {:api-key api-key
@@ -80,18 +80,16 @@
             (close-stream-safe stream)
             (handle-http-error! channel-callbacks status body))
 
-          :else
-          (let [sse-callbacks (chat-sse/make-stream-handlers
-                               {:emit! (:emit! channel-callbacks)
-                                :complete! (:complete! channel-callbacks)
-                                :error! (:error! channel-callbacks)
-                                :stream stream
-                                :on-parse-error on-parse-error
-                                :parse-chunks? parse-chunks?})
-                accumulator (cond
-                             accumulate? parser/accumulate-content
-                             parse-chunks? parser/accumulate-metadata
-                             :else nil)]
+           :else
+           (let [sse-callbacks (chat-sse/make-stream-handlers
+                                {:emit! (:emit! channel-callbacks)
+                                 :complete! (:complete! channel-callbacks)
+                                 :error! (:error! channel-callbacks)
+                                 :stream stream
+                                 :on-parse-error on-parse-error})
+                 accumulator (if accumulate?
+                               parser/accumulate-content
+                               parser/accumulate-metadata)]
             (sse/consume-sse!
              stream
              {:accumulator accumulator

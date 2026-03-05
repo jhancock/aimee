@@ -90,7 +90,7 @@
   (:event terminal-2)
   (get-in terminal-2 [:data :usage])
 
-  ;; Example 3: Raw SSE proxy mode (:parse-chunks? false, :accumulate? false)
+  ;; Example 3: Parsed chunks without accumulation (:accumulate? false)
   (def ch-3 (async/chan 64))
   (chat/start-request!
    {:url openai-api-url
@@ -98,24 +98,9 @@
     :channel ch-3
     :model "gpt-5-mini"
     :stream? true
-    :parse-chunks? false
     :accumulate? false
-    :messages [{:role "user" :content "Quick greeting."}]})
+    :messages [{:role "user" :content "Count from 1 to 3."}]})
   (def terminal-3 (log-events!! ch-3))
   (:event terminal-3)
   (get-in terminal-3 [:data :content])
-
-  ;; Example 4: Parsed chunks without accumulation (:accumulate? false)
-  (def ch-4 (async/chan 64))
-  (chat/start-request!
-   {:url openai-api-url
-    :api-key openai-api-key
-    :channel ch-4
-    :model "gpt-5-mini"
-    :stream? true
-    :accumulate? false
-    :messages [{:role "user" :content "Count from 1 to 3."}]})
-  (def terminal-4 (log-events!! ch-4))
-  (:event terminal-4)
-  (get-in terminal-4 [:data :content])
   )

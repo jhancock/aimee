@@ -4,54 +4,25 @@
    The key concepts:
    1. Create a core.async channel for events
    2. Call chat/start-request! with the event channel
-   3. Return event channel as HTTP response body
-   4. write-body-to-stream transforms events to SSE and streams to client
+   3. Use ring/->ring-stream to create a Ring response body
+   4. ->ring-stream handles SSE formatting and allows event hooks
 
    Run: clojure -M:chat-server -m aimee.example.chat-server
    REPL: (start-server!) (stop-server!)
    Test: curl -X POST http://localhost:8080/chat -H 'Content-Type: application/json' -d '{\"messages\":[{\"role\":\"user\",\"text\":\"hello\"}]}'
   "
   (:require [aimee.chat.client :as chat]
-            [aimee.chat.sse-helpers :as sse-helpers]
+            [aimee.chat.ring :as ring]
             [cheshire.core :as json]
             [clojure.core.async :as async]
-            [clojure.java.io :as io]
-            [clojure.tools.logging :as log]
             [compojure.core :refer [defroutes GET POST]]
             [compojure.route :as route]
             [hiccup2.core :as h]
-            [ring.adapter.jetty9 :as jetty]
-            [ring.core.protocols :as protocols]
-            [aimee.pp :refer [pprint]])
-  (:import (clojure.core.async.impl.channels ManyToManyChannel)
-           (org.eclipse.jetty.util.thread QueuedThreadPool)
+            [ring.adapter.jetty9 :as jetty])
+  (:import (org.eclipse.jetty.util.thread QueuedThreadPool)
            (java.util.concurrent Executors)))
 
 (defonce server* (atom nil))
-
-(extend-protocol protocols/StreamableResponseBody
-  ManyToManyChannel
-  (write-body-to-stream [event-ch _response output-stream]
-    (with-open [writer (io/writer output-stream)]
-      (loop []
-        (when-let [event (async/<!! event-ch)]
-          (case (:event event)
-            :chunk
-            (do
-              (when-let [frame (sse-helpers/event->simplified-sse event)]
-                (.write writer frame)
-                (.flush writer))
-              (recur))
-            :complete
-            (do
-              (.write writer (sse-helpers/format-sse-done))
-              (.flush writer))
-            :error
-            (let [err-msg (str "Error: " (:data event))]
-              (log/error err-msg)
-              (.write writer (sse-helpers/format-sse-data {:text err-msg}))
-              (.write writer (sse-helpers/format-sse-done))
-              (.flush writer))))))))
 
 (defn- extract-user-message
   [request]
@@ -66,7 +37,7 @@
                    last)
               ""))
         (catch Exception e
-          (log/error e "Failed to parse JSON body")
+          (println "Failed to parse JSON body:" (.getMessage e))
           "")))))
 
 (defn- make-chat-opts
@@ -115,37 +86,28 @@ customElements.whenDefined('deep-chat').then(() => {
 (defn- handle-chat-stream
   [request]
   (let [body (slurp (:body request))]
-    (log/info "Deep Chat request body:" body)
+    (println "Request:" body)
     (let [event-channel (async/chan 128)
           user-message (extract-user-message {:body (java.io.ByteArrayInputStream. (.getBytes body))})]
-    (if (empty? user-message)
-      (do
-        (async/>!! event-channel {:event :error :data "No message provided"})
-        (async/close! event-channel))
-      (chat/start-request! (make-chat-opts user-message event-channel)))
-    {:status 200
-     :headers {"content-type" "text/event-stream; charset=utf-8"
-               "cache-control" "no-cache"}
-     :body event-channel})))
-
-(defn- handle-simple-stream
-  [request]
-  (let [event-channel (async/chan 128)
-        user-message (str (.trim (slurp (:body request))))]
-    (if (empty? user-message)
-      (do
-        (async/>!! event-channel {:event :error :data "No message provided"})
-        (async/close! event-channel))
-      (chat/start-request! (make-chat-opts user-message event-channel)))
-    {:status 200
-     :headers {"content-type" "text/event-stream; charset=utf-8"
-               "cache-control" "no-cache"}
-     :body event-channel}))
+      (if (empty? user-message)
+        (do
+          (async/>!! event-channel {:event :error :data "No message provided"})
+          (async/close! event-channel))
+        (chat/start-request! (make-chat-opts user-message event-channel)))
+      {:status 200
+       :headers {"content-type" "text/event-stream; charset=utf-8"
+                 "cache-control" "no-cache"}
+       :body (ring/->ring-stream event-channel
+                 {:on-chunk (fn [e]
+                              (println "Chunk:" (get-in e [:data :parsed :content]))
+                              e)
+                  :on-complete (fn [e]
+                                 (println "Complete:" (:data e))
+                                 e)})})))
 
 (defroutes app
   (GET "/chat" [] handle-chat-page)
   (POST "/chat" [] handle-chat-stream)
-  (POST "/chat/simple" [] handle-simple-stream)
   (route/not-found "Not found"))
 
 (defn stop-server!

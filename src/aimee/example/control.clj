@@ -139,7 +139,6 @@
       :complete! (fn [info] (reset! error-final-3 info))
       :error! (fn [ex] (swap! error-events-3 conj {:event :error :data ex}))
       :stream nil
-      :parse-chunks? true
       :on-parse-error :stop}))
   (sse/consume-sse!
    failing-input

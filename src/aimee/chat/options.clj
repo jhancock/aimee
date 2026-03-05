@@ -17,12 +17,7 @@
    ;; returned in a single :complete event.
    :stream? false
 
-   ;; When true, each :chunk event includes a :parsed key with decoded JSON
-   ;; fields (:content, :tool-calls, :api-finish-reason, etc.). When false,
-   ;; chunks contain only raw unparsed SSE data.
-   :parse-chunks? true
-
-   ;; When true, text from all chunks is concatenated and included in the
+    ;; When true, text from all chunks is concatenated and included in the
    ;; :complete event's :content field. Useful when you want the full response
    ;; text without manually accumulating chunks.
    :accumulate? true
@@ -128,7 +123,6 @@
 (s/def ::model non-blank-string?)
 (s/def ::messages (s/and sequential? seq))
 (s/def ::stream? boolean?)
-(s/def ::parse-chunks? boolean?)
 (s/def ::accumulate? boolean?)
 (s/def ::on-parse-error #{:stop :continue})
 (s/def ::overflow-max pos-int?)
@@ -144,11 +138,10 @@
 
 (s/def ::opts
   (s/keys :req-un [::channel ::url ::model ::messages]
-          :opt-un [::stream?
-                   ::api-key
-                   ::api-key-fn
-                   ::parse-chunks?
-                   ::accumulate?
+           :opt-un [::stream?
+                    ::api-key
+                    ::api-key-fn
+                    ::accumulate?
                    ::on-parse-error
                    ::overflow-max
                    ::overflow-mode

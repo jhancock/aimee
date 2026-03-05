@@ -53,17 +53,17 @@
         (:refusal? parsed) (assoc :refusal? true)))))
 
 (defn event->simplified-sse
-  "Convert a channel event into a simplified SSE frame.
+  "Convert a :chunk event into a simplified SSE frame.
 
-  Input contract:
-  - Expects channel events of shape {:event <keyword> :data <payload>}.
+   Input contract:
+   - Expects channel events of shape {:event <keyword> :data <payload>}.
 
-  Behavior:
-  - :chunk events with content -> `data: {\"text\":\"...\"}\\n\\n`
-  - :complete events emit DONE only when :data includes :done-event
-  - :complete events without :done-event -> nil
-  - :error events -> nil
-  "
+   Behavior:
+   - :chunk events with content -> `data: {\"text\":\"...\"}\\n\\n`
+   - :chunk events with no content -> nil
+   - :complete events -> nil (handled by consume-channel!)
+   - :error events -> nil (handled by consume-channel!)
+   "
   [channel-event]
   (when (map? channel-event)
     (case (:event channel-event)
@@ -72,11 +72,7 @@
               chunk->payload
               format-sse-data)
 
-      :complete
-      (when (get-in channel-event [:data :done-event])
-        (format-sse-done))
-
-      :error
-      nil
+      :complete nil
+      :error nil
 
       nil)))
