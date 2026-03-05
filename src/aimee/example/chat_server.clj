@@ -3,13 +3,14 @@
 
    The key concepts:
    1. Create a core.async channel for events
-   2. Call chat/start-request! with the event channel
-   3. Use ring/->ring-stream to create a Ring response body
+   2. Call aimee.chat/start-request! with the event channel
+   3. Use aimee.ring/->ring-stream to create a Ring response body
    4. ->ring-stream handles SSE formatting and allows event hooks
 
-   Run: clojure -M:chat-server -m aimee.example.chat-server
-   REPL: (start-server!) (stop-server!)
-   Test: curl -X POST http://localhost:8080/chat -H 'Content-Type: application/json' -d '{\"messages\":[{\"role\":\"user\",\"text\":\"hello\"}]}'
+   REPL: (start-server!) 
+   Test:
+   open browser to http://localhost:8080/chat
+   curl -X POST http://localhost:8080/chat -H 'Content-Type: application/json' -d '{\"messages\":[{\"role\":\"user\",\"text\":\"hello\"}]}'
   "
   (:require [aimee.chat.client :as chat]
             [aimee.chat.ring :as ring]
@@ -21,34 +22,6 @@
             [ring.adapter.jetty9 :as jetty])
   (:import (org.eclipse.jetty.util.thread QueuedThreadPool)
            (java.util.concurrent Executors)))
-
-(defonce server* (atom nil))
-
-(defn- extract-user-message
-  [request]
-  (let [body (slurp (:body request))]
-    (if (empty? body)
-      ""
-      (try
-        (let [payload (json/parse-string body true)]
-          (or (->> (:messages payload)
-                   (filter #(= "user" (:role %)))
-                   (map :text)
-                   last)
-              ""))
-        (catch Exception e
-          (println "Failed to parse JSON body:" (.getMessage e))
-          "")))))
-
-(defn- make-chat-opts
-  [user-message event-channel]
-  {:url (or (System/getenv "OPENAI_API_URL")
-            "https://api.openai.com/v1/chat/completions")
-   :api-key (System/getenv "OPENAI_API_KEY")
-   :model "gpt-5-mini"
-   :stream? true
-   :channel event-channel
-   :messages [{:role "user" :content user-message}]})
 
 (defn- chat-page []
   (str "<!DOCTYPE html>\n"
@@ -83,32 +56,51 @@ customElements.whenDefined('deep-chat').then(() => {
    :headers {"content-type" "text/html; charset=utf-8"}
    :body (chat-page)})
 
-(defn- handle-chat-stream
+(defn- extract-user-message
   [request]
   (let [body (slurp (:body request))]
-    (println "Request:" body)
-    (let [event-channel (async/chan 128)
-          user-message (extract-user-message {:body (java.io.ByteArrayInputStream. (.getBytes body))})]
-      (if (empty? user-message)
-        (do
-          (async/>!! event-channel {:event :error :data "No message provided"})
-          (async/close! event-channel))
-        (chat/start-request! (make-chat-opts user-message event-channel)))
-      {:status 200
-       :headers {"content-type" "text/event-stream; charset=utf-8"
-                 "cache-control" "no-cache"}
-       :body (ring/->ring-stream event-channel
-                 {:on-chunk (fn [e]
-                              (println "Chunk:" (get-in e [:data :parsed :content]))
-                              e)
-                  :on-complete (fn [e]
-                                 (println "Complete:" (:data e))
-                                 e)})})))
+    (if (empty? body)
+      ""
+      (try
+        (let [payload (json/parse-string body true)]
+          (or (->> (:messages payload)
+                   (filter #(= "user" (:role %)))
+                   (map :text)
+                   last)
+              ""))
+        (catch Exception e
+          (println "Failed to parse JSON body:" (.getMessage e))
+          "")))))
+
+(defn- handle-chat-stream
+  [request]
+  (let [event-channel (async/chan 128)
+        user-message (extract-user-message request)]
+    (chat/start-request!
+      {:url (or (System/getenv "OPENAI_API_URL")
+                "https://api.openai.com/v1/chat/completions")
+       :api-key (System/getenv "OPENAI_API_KEY")
+       :model "gpt-5-mini"
+       :stream? true
+       :channel event-channel
+       :messages [{:role "user" :content user-message}]})
+    {:status 200
+     :headers {"content-type" "text/event-stream; charset=utf-8"
+               "cache-control" "no-cache"}
+     :body (ring/->ring-stream event-channel
+               {:on-chunk (fn [e]
+                            (println "Chunk:" (get-in e [:data :parsed :content]))
+                            e)
+                :on-complete (fn [e]
+                               (println "Complete:" (:data e))
+                               e)})}))
 
 (defroutes app
   (GET "/chat" [] handle-chat-page)
   (POST "/chat" [] handle-chat-stream)
   (route/not-found "Not found"))
+
+(defonce server* (atom nil))
 
 (defn stop-server!
   []

@@ -64,7 +64,6 @@ Calling `:stop!` cancels the request and emits `:complete` with `:reason :stoppe
 
 - **`:stream?`** — `false` — Enable streaming response
 - **`:accumulate?`** — `true` — Accumulate content in `:complete`
-- **`:parse-chunks?`** — `true` — Include `:parsed` in chunk events
 - **`:overflow-mode`** — `:queue` — `:queue` or `:block`
 - **`:overflow-max`** — `1000` — Max queued events before backpressure
 - **`:channel-idle-timeout-ms`** — `nil` — Abort if no progress for this duration
