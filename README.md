@@ -1,6 +1,6 @@
 # aimee
 
-Streaming Chat Completions over core.async channels.
+Aimee is a library for streaming and non-streaming OpenAI compatible Chat Completions over core.async channels. Aimee is intended to be highly robust and scalable. Depends on org.clojure/core.async 1.9.829-alpha2 to leverage latest JDK 21+ virtual thread behavior. Tested with OpenAI Chat Conpletion API.
 
 ## Install
 
@@ -8,13 +8,18 @@ Streaming Chat Completions over core.async channels.
 {:deps
  {jhancock/aimee
   {:git/url "https://github.com/jhancock/aimee.git"
-   :git/sha "09db738e255fb5c743468d5a0a76946c8e87fac3"}}}
+   :git/tag "v0.1.0"}}}
 ```
 
-Get the latest SHA:
-```bash
-git ls-remote https://github.com/jhancock/aimee.git HEAD | awk '{print $1}'
-```
+## How It Works
+
+1. You create a `core.async` channel
+2. Pass it to `start-request!` with your request options. This creates a virtual thread to handle the HTTP request and result processing lifecycle.
+3. Events are written to your channel as the request progresses
+4. Consume events from your channel (via `go-loop`, `<!!`, etc.)
+5. Channel closes after `:complete` or `:error`
+
+The channel is yours. You control its buffer size, how you consume from it. The library handles the chat completion request lifecycle, writes events to the channel, closes it when done and handles slow channel consumer overflow with backpressure options. Aimee provides helper functions such as `aimee.chat.ring/->ring-stream` to write SSE chunks to an HTTP streaming response. See [`aimee.example.chat-server`](src/aimee/example/chat_server.clj) for a complete working example.
 
 ## Quick Start
 
@@ -39,14 +44,14 @@ git ls-remote https://github.com/jhancock/aimee.git HEAD | awk '{print $1}'
     (case (:event event)
       :chunk
       (do
-        (prn "Event" event)
+        (prn "Chunk Event" event)
         (recur))
 
       :complete
-      (prn "Event" event)
+      (prn "Complete Event" event)
 
       :error
-      (prn "Event" event))))
+      (prn "Error Event" event))))
 ```
 
 ## API
@@ -74,22 +79,12 @@ Calling `:stop!` cancels the request and emits `:complete` with `:reason :stoppe
 - **`:accumulate?`** — `true` — Accumulate content in `:complete`
 - **`:backpressure`** — `:queue` — `:queue` or `:block`
 - **`:queue-capacity`** — `1000` — Capacity of overflow queue when :backpressure is :queue
-- **`:channel-idle-timeout-ms`** — `nil` — Abort if no progress for this duration
-- **`:http-timeout-ms`** — `nil` — HTTP request timeout
+- **`:channel-idle-timeout-ms`** — `nil` — Abort if no progress for this duration. `nil` means aimee doesn't impose a timeout on channel consumption.
+- **`:http-timeout-ms`** — `nil` — HTTP request timeout. `nil` means the HTTP library possibly uses its default timeout.
 - **`:include-usage?`** — `false` — Include usage stats in streaming `:complete`
 - **`:on-parse-error`** — `:stop` — `:stop` emits error and closes; `:continue` logs and skips
 
 For full defaults and descriptions, see [`aimee.chat.options/defaults`](src/aimee/chat/options.clj).
-
-## How It Works
-
-1. You create a `core.async` channel
-2. Pass it to `start-request!` with your request options
-3. Events are written to your channel as the request progresses
-4. Consume events from your channel (via `go-loop`, `<!!`, etc.)
-5. Channel closes after `:complete` or `:error`
-
-The channel is yours—you control its buffer size, how you consume from it, and whether to use blocking or non-blocking reads. The library only writes events and closes it when done.
 
 ## Events
 
@@ -97,46 +92,111 @@ All events have shape `{:event <keyword> :data <payload>}`.
 
 ### `:chunk`
 
-Streaming content delta.
+Streaming content delta. Emitted for each SSE data chunk during streaming.
 
 ```clojure
+;; example chunk event
 {:event :chunk
- :data {:id "..." :type "..." :data "{...}" :parsed {...}}}
+ :data {:id nil
+        :type nil
+        :data "{\"id\":\"chatcmpl-...\",\"object\":\"chat.completion.chunk\",...}"
+        :parsed {:content "Hello"
+                 :role "assistant"
+                 :tool-calls nil
+                 :function-call nil
+                 :api-finish-reason nil
+                 :usage nil
+                 :done? false}}}
 ```
 
-`(:parsed (:data event))` includes:
+**`:data` map:**
+- **`:id`** — SSE event ID (often nil)
+- **`:type`** — SSE event type (often nil)
+- **`:data`** — Raw JSON string from API
+- **`:parsed`** — Parsed OpenAI chunk data
 
-- **`:content`** — Delta text
-- **`:role`** — Role string
-- **`:tool-calls`** — Tool definitions
-- **`:api-finish-reason`** — `"stop"`, `"length"`, `"content_filter"`, `"tool_calls"`
-- **`:usage`** — Token counts (when available)
-- **`:done?`** — Terminal chunk flag
+**`:parsed` map:**
+- **`:content`** — Delta text (may be empty string)
+- **`:role`** — Role string (appears in first chunk, nil thereafter)
+- **`:tool-calls`** — Tool definitions (when present)
+- **`:function-call`** — Function call (deprecated format, when present)
+- **`:api-finish-reason`** — `"stop"`, `"length"`, `"content_filter"`, `"tool_calls"` (in final chunk)
+- **`:usage`** — Token counts (when `:include-usage? true`, in final chunk)
+- **`:done?`** — `true` when `[DONE]` sentinel received
 
 ### `:complete`
 
-Request finished.
+Terminal success event. Emitted once when request completes.
 
 ```clojure
+;; example complete event
 {:event :complete
- :data {:content "..." :reason :done :api-finish-reason "stop" ...}}
+ :data {:content "Hello! How can I assist you today?"
+        :reason :done
+        :api-finish-reason "stop"
+        :role "assistant"
+        :done-event {:id nil :type nil :data "[DONE]"}}}
 ```
 
-- **`:content`** — Accumulated text (when `:accumulate? true`)
-- **`:reason`** — `:done`, `:stopped`, `:timeout`, `:eof`
-- **`:api-finish-reason`** — Passthrough from API
-- **`:role`, `:tool-calls`, `:usage`, `:refusal`, `:refusal?`** — As returned by API
+**`:data` map:**
+- **`:content`** — Accumulated text (when `:accumulate? true`, empty string otherwise)
+- **`:reason`** — Library completion reason: `:done`, `:stopped`, `:timeout`, `:eof`
+- **`:api-finish-reason`** — Passthrough from API: `"stop"`, `"length"`, `"content_filter"`, `"tool_calls"`
+- **`:role`** — Final role (usually `"assistant"`)
+- **`:tool-calls`** — Accumulated tool calls (when present)
+- **`:usage`** — Token counts (when available)
+- **`:refusal`** — Refusal content (when present)
+- **`:refusal?`** — `true` if response was a refusal
+- **`:done-event`** — The `[DONE]` SSE event that terminated the stream
 
 ### `:error`
 
-Request failed. `:data` is an exception.
+Terminal failure event. Emitted once when request fails.
 
-## Backpressure
+```clojure
+;; example error event
+{:event :error
+ :data #error {:cause "HTTP error"
+               :data {:status 401
+                      :body "{\"error\":{\"message\":\"Incorrect API key...\"}}"}}}
+```
 
-- **`:queue`** — Creates bounded overflow queue (capacity set by `:queue-capacity`), drains in background thread
-- **`:block`** — Blocks producer immediately when channel is full
+**`:data`** — Exception with:
+- **`:cause`** — Error message
+- **`:data`** — Exception data map (may include `:status`, `:body` for HTTP errors)
 
-Progress timestamps update only on successful channel writes. Idle timeout uses this to detect stalled delivery.
+## Backpressure options
+
+When your channel consumer is slower than the SSE stream, events back up. Two strategies handle this:
+
+### `:backpressure :queue` (default)
+
+Events first attempt direct write to your channel. When full, creates a bounded overflow queue (capacity set by `:queue-capacity`) that drains in background thread.
+
+**Tradeoff:** Extra memory for queue, but preserves all events and keeps HTTP stream flowing.
+
+**Use when:** Consumer is temporarily slow but will catch up.
+
+### `:backpressure :block`
+
+Writes directly block when channel is full. No overflow queue.
+
+**Tradeoff:** Simpler, but blocks the SSE stream thread. Slow consumer stalls the entire HTTP response.
+
+**Use when:** Consumer is always fast, or you want backpressure to slow the HTTP response.
+
+### Channel Buffer
+
+Your channel buffer is the first line of defense. Larger buffers absorb temporary slowdowns before backpressure engages:
+
+```clojure
+(async/chan 10)   ;; Small - backpressure kicks in quickly if your channel consumer is slow
+(async/chan 1000) ;; Large - absorbs bursts. However, the 
+```
+
+### Idle Timeout
+
+`:channel-idle-timeout-ms` detects stalled consumers. Emits `:complete` with `:reason :timeout` if no event is successfully delivered to your consumer for this duration. Progress tracks only successful channel writes (not queue additions).
 
 ## SSE Helpers
 
@@ -171,50 +231,26 @@ Converts channel events to SSE frames for streaming to browsers:
 
 **[src/aimee/example/](src/aimee/example/)** — REPL examples for streaming, parsing, backpressure, lifecycle
 
-## Build
-
-```sh
-clojure -T:build jar
-```
-
-## Publish
-
-```sh
-clojure -T:build deploy
-```
 
 ## Example Chat Server
 
-Bare-bones HTTP example app that serves a one-page Deep Chat client at `/chat` and streams responses through `aimee.chat.client`.
+HTTP example app that serves a one-page chat client at `/chat`.
 
 ### Requirements
 
-- `OPENAI_API_KEY` must be set
-- `OPENAI_API_URL` is optional (defaults to OpenAI)
+- Environment variable `OPENAI_API_KEY` must be set or modify the example code to set this value
+- `OPENAI_API_URL` optionally sets the API URL (defaults to OpenAI's)
 - Model default is `gpt-5-mini`
 
 ### Run
 
 ```sh
-clojure -M:chat-server
+clojure -M:dev
 ```
+`aimee.example.chat-server` has a comment block at the end to start and stop the server
 
 Then open http://localhost:8080/chat
-
-Optional custom port:
-
+or test with curl
 ```sh
-clojure -M:chat-server -- 8090
+curl -X POST http://localhost:8080/chat -H 'Content-Type: application/json' -d '{\"messages\":[{\"role\":\"user\",\"text\":\"hello\"}]}'
 ```
-
-### Simple SSE Test Endpoint
-
-Use `POST /chat/simple` to test streaming with plain text or JSON:
-
-```sh
-curl -N -X POST http://localhost:8080/chat/simple \
-  -H "content-type: text/plain" \
-  --data "Say hello in five words."
-```
-
-Implementation: `src/aimee/example/chat_server.clj`
