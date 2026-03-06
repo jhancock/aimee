@@ -1,48 +1,40 @@
-# Repository Guidelines
+# AI Assistant Guidelines
 
-## Project Structure & Module Organization
-- `src/aimee/` contains the library code.
-- `src/aimee/chat/` contains the chat-completions pipeline:
-  - `client.clj` request entrypoint/lifecycle
-  - `executor.clj` HTTP execution
-  - `options.clj` defaults and validation
-  - `sse.clj` stream handler wiring
-  - `parser.clj` payload parsing/accumulation
-  - `emitter.clj` channel emission and backpressure
-  - `timeout.clj` idle-timeout behavior
-  - `events.clj` event constructors
-  - `sse-helpers.clj` browser SSE formatting (chat protocol specific)
-- Low-level SSE framing/parsing is in `src/aimee/sse.clj` and `src/aimee/sse_parser.clj`.
-- REPL/dev helpers are in `src/aimee/simulator.clj`, `src/aimee/stress.clj`, and `src/aimee/scheduler_simulator.clj`.
-- No `test/` source set is used for standalone test execution at this stage.
+## Development Environment
 
-## REPL, and Development Commands
-- `clojure -M:nrepl` starts nREPL on port `7888`.
-- Quick load check for core namespaces:
-  - `clojure -M -e "(require 'aimee.chat.client 'aimee.sse 'aimee.scheduler)"`
+Use `clj-nrepl-eval` to evaluate Clojure code via the running nREPL server on port 7888.
 
-## Testing Workflow (Current)
-- There is intentionally no standalone automated test command yet.
-- Validation is REPL-first through executable `(comment ...)` blocks in source files.
-- Primary verification namespaces:
-  - `src/aimee/simulator.clj`
-  - `src/aimee/stress.clj`
-  - `src/aimee/scheduler_simulator.clj`
-- If automated tests are introduced later, favor minimal suites that do not constrain active code shaping.
+**Check nREPL availability:**
+```bash
+clj-nrepl-eval --discover-ports
+```
 
-## Coding Style & Naming Conventions
-- Use standard Clojure formatting and 2-space indentation.
-- Use kebab-case for namespaces/functions.
-- Prefer explicit state names (`stop?`, `stream-ref`, `terminated?`, `last-progress`).
-- Caller-owned channels are passed via `:channel`; this library writes events and closes channel on terminal events.
+**Evaluate code (always use `:reload` to pick up changes):**
+```bash
+clj-nrepl-eval -p 7888 "(require '[aimee.chat.client :as chat] :reload)"
+```
 
-## Architecture Notes
-- Core flow: `start-request!` -> `executor` -> SSE consume/parse -> emit channel events.
-- Event shape is always `{ :event <keyword> :data <payload> }`.
-- Backpressure controls: `:backpressure` (`:queue` or `:block`) and `:queue-capacity`.
-- Timeout control: `:channel-idle-timeout-ms` emits `:complete` with `:reason :timeout` when delivery stalls.
+## Key Concepts
 
-## Documentation
-- `docs/overview.md`: high-level map and workflow.
-- `docs/api.md`: options and event contract.
-- `docs/architecture.md`: runtime flow and subsystem behavior.
+**Event shape:** `{:event <keyword> :data <payload>}` — defined in `aimee.chat.events`
+
+**Event types:**
+- `:chunk` — Streaming delta
+- `:complete` — Terminal success (includes `:reason`: `:done`, `:stopped`, `:timeout`, `:eof`)
+- `:error` — Failure (exception in `:data`)
+
+**Core flow:**
+- `aimee.chat.client/start-request!` — Entry point, validates opts, initializes lifecycle
+- `aimee.chat.executor` — HTTP execution (streaming/non-streaming)
+- `aimee.sse/consume-sse!` — SSE stream consumption
+- `aimee.sse-parser` — SSE frame parsing
+- `aimee.chat.parser` — OpenAI payload parsing, content accumulation
+- `aimee.chat.emitter` — Channel emission with backpressure
+
+**Backpressure modes** (`aimee.chat.emitter`):
+- `:queue` — Bounded overflow queue, background drain
+- `:block` — Immediate blocking on full channel
+
+## Testing
+
+No automated tests. Validate via REPL evaluation in `src/aimee/example/` files.

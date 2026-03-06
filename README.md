@@ -5,7 +5,15 @@ Streaming Chat Completions over core.async channels.
 ## Install
 
 ```edn
-{jhancock/aimee {:mvn/version "0.1.0-SNAPSHOT"}}
+{:deps
+ {jhancock/aimee
+  {:git/url "https://github.com/jhancock/aimee.git"
+   :git/sha "09db738e255fb5c743468d5a0a76946c8e87fac3"}}}
+```
+
+Get the latest SHA:
+```bash
+git ls-remote https://github.com/jhancock/aimee.git HEAD | awk '{print $1}'
 ```
 
 ## Quick Start
@@ -72,6 +80,16 @@ Calling `:stop!` cancels the request and emits `:complete` with `:reason :stoppe
 - **`:on-parse-error`** — `:stop` — `:stop` emits error and closes; `:continue` logs and skips
 
 For full defaults and descriptions, see [`aimee.chat.options/defaults`](src/aimee/chat/options.clj).
+
+## How It Works
+
+1. You create a `core.async` channel
+2. Pass it to `start-request!` with your request options
+3. Events are written to your channel as the request progresses
+4. Consume events from your channel (via `go-loop`, `<!!`, etc.)
+5. Channel closes after `:complete` or `:error`
+
+The channel is yours—you control its buffer size, how you consume from it, and whether to use blocking or non-blocking reads. The library only writes events and closes it when done.
 
 ## Events
 
@@ -149,10 +167,9 @@ Converts channel events to SSE frames for streaming to browsers:
 (write-frame (sse-helpers/format-sse-done))
 ```
 
-## Docs & Examples
+## Examples
 
-- **[docs/architecture.md](docs/architecture.md)** — Design principles, runtime flow
-- **[src/aimee/example/](src/aimee/example/)** — REPL examples for streaming, parsing, backpressure, lifecycle
+**[src/aimee/example/](src/aimee/example/)** — REPL examples for streaming, parsing, backpressure, lifecycle
 
 ## Build
 

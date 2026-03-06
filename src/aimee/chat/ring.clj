@@ -98,7 +98,9 @@
    
    Note: Handlers run on the HTTP request thread. For async operations,
    spawn your own thread/go-block inside the handler."
-  [channel handlers]
-  (reify protocols/StreamableResponseBody
-    (write-body-to-stream [this _response output-stream]
-      (consume-channel! channel output-stream handlers))))
+  ([channel]
+   (->ring-stream channel {}))
+  ([channel handlers]
+   (reify protocols/StreamableResponseBody
+     (write-body-to-stream [this _response output-stream]
+       (consume-channel! channel output-stream handlers)))))
