@@ -35,9 +35,9 @@
    - :on-parse-error (default :stop) - When :stop, emit :error event and close stream on
                         parse failure. When :continue, log warning and skip bad chunk.
 
-  Backpressure opts:
-  - :overflow-max (default 10000) - Max queued events before applying backpressure
-  - :overflow-mode (default :queue) - :queue creates lazy overflow queue, :block blocks immediately
+   Backpressure opts:
+   - :queue-capacity (default 1000) - Capacity of overflow queue when :backpressure is :queue
+   - :backpressure (default :queue) - :queue creates bounded overflow queue, :block blocks immediately
 
   Timeout opts:
   - :channel-idle-timeout-ms - Abort if no progress events emitted for this duration
@@ -61,7 +61,7 @@
           terminated? (atom false)
           channel-callbacks (emitter/make-channel-callbacks
                              channel
-                             (merge (select-keys opts [:overflow-max :overflow-mode])
+                             (merge (select-keys opts [:queue-capacity :backpressure])
                                     {:terminated? terminated?}))
           stop-fn (make-stop-fn stop? stream-ref)
           {:keys [last-progress emit!]} channel-callbacks]

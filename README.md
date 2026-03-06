@@ -64,8 +64,8 @@ Calling `:stop!` cancels the request and emits `:complete` with `:reason :stoppe
 
 - **`:stream?`** — `false` — Enable streaming response
 - **`:accumulate?`** — `true` — Accumulate content in `:complete`
-- **`:overflow-mode`** — `:queue` — `:queue` or `:block`
-- **`:overflow-max`** — `1000` — Max queued events before backpressure
+- **`:backpressure`** — `:queue` — `:queue` or `:block`
+- **`:queue-capacity`** — `1000` — Capacity of overflow queue when :backpressure is :queue
 - **`:channel-idle-timeout-ms`** — `nil` — Abort if no progress for this duration
 - **`:http-timeout-ms`** — `nil` — HTTP request timeout
 - **`:include-usage?`** — `false` — Include usage stats in streaming `:complete`
@@ -115,7 +115,7 @@ Request failed. `:data` is an exception.
 
 ## Backpressure
 
-- **`:queue`** — Creates lazy overflow queue up to `:overflow-max`, drains in background thread
+- **`:queue`** — Creates bounded overflow queue (capacity set by `:queue-capacity`), drains in background thread
 - **`:block`** — Blocks producer immediately when channel is full
 
 Progress timestamps update only on successful channel writes. Idle timeout uses this to detect stalled delivery.

@@ -27,16 +27,18 @@
    ;;   :continue — log a warning and skip the malformed chunk
    :on-parse-error :stop
 
-   ;; Backpressure strategy when the channel cannot accept events:
-   ;;   :queue — create an overflow buffer (up to :overflow-max) and drain
-   ;;            in a background thread; preserves events until consumer catches up.
-   ;;   :block — block the producer thread until the channel has capacity;
-   ;;            simpler but may stall the SSE stream since it's connected to the HTTP request thread
-   :overflow-mode :queue
+    ;; Backpressure strategy when the channel is full:
+    ;;   :queue — create a bounded queue (capacity set by :queue-capacity) and drain
+    ;;            in a background thread; preserves events until consumer catches up.
+    ;;   :block — block the producer thread until the channel has capacity;
+    ;;            simpler but may stall the SSE stream since it's connected to the HTTP request thread
+    :backpressure :queue
 
-   ;; Maximum number of events to buffer when the consumer is slow. Once
-   ;; exceeded, backpressure is applied according to :overflow-mode.
-   :overflow-max 1000
+    ;; Maximum capacity of the overflow queue (used only in :queue mode).
+    ;; Events first attempt direct write to the channel. When the channel is full,
+    ;; an overflow queue is created with this capacity. Once the queue reaches
+    ;; this size, the producer thread blocks until space is available.
+    :queue-capacity 1000
 
    ;; Milliseconds to wait for the consumer to accept an event before aborting.
    ;; This protects against slow or blocked consumers: if no event is
@@ -125,8 +127,8 @@
 (s/def ::stream? boolean?)
 (s/def ::accumulate? boolean?)
 (s/def ::on-parse-error #{:stop :continue})
-(s/def ::overflow-max pos-int?)
-(s/def ::overflow-mode #{:queue :block})
+(s/def ::queue-capacity pos-int?)
+(s/def ::backpressure #{:queue :block})
 (s/def ::channel-idle-timeout-ms (s/nilable nat-int?))
 (s/def ::http-timeout-ms (s/nilable nat-int?))
 (s/def ::headers (s/nilable map?))
@@ -143,8 +145,8 @@
                     ::api-key-fn
                     ::accumulate?
                    ::on-parse-error
-                   ::overflow-max
-                   ::overflow-mode
+                   ::queue-capacity
+                   ::backpressure
                    ::channel-idle-timeout-ms
                    ::http-timeout-ms
                    ::headers

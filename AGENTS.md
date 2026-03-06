@@ -16,9 +16,7 @@
 - REPL/dev helpers are in `src/aimee/simulator.clj`, `src/aimee/stress.clj`, and `src/aimee/scheduler_simulator.clj`.
 - No `test/` source set is used for standalone test execution at this stage.
 
-## Build, REPL, and Development Commands
-- `clojure -T:build jar` builds the library JAR into `target/`.
-- `clojure -T:build deploy` builds and deploys to Clojars (credentials required).
+## REPL, and Development Commands
 - `clojure -M:nrepl` starts nREPL on port `7888`.
 - Quick load check for core namespaces:
   - `clojure -M -e "(require 'aimee.chat.client 'aimee.sse 'aimee.scheduler)"`
@@ -41,7 +39,7 @@
 ## Architecture Notes
 - Core flow: `start-request!` -> `executor` -> SSE consume/parse -> emit channel events.
 - Event shape is always `{ :event <keyword> :data <payload> }`.
-- Backpressure controls: `:overflow-mode` (`:queue` or `:block`) and `:overflow-max`.
+- Backpressure controls: `:backpressure` (`:queue` or `:block`) and `:queue-capacity`.
 - Timeout control: `:channel-idle-timeout-ms` emits `:complete` with `:reason :timeout` when delivery stalls.
 
 ## Documentation

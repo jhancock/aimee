@@ -4,16 +4,16 @@
             [clojure.tools.logging :as log]))
 
 (defn- ensure-overflow-opts
-  [overflow-max overflow-mode]
-  (when (nil? overflow-max)
-    (throw (ex-info ":overflow-max is required" {:type :missing-overflow-max})))
-  (when (nil? overflow-mode)
-    (throw (ex-info ":overflow-mode is required" {:type :missing-overflow-mode}))))
+  [queue-capacity backpressure]
+  (when (nil? queue-capacity)
+    (throw (ex-info ":queue-capacity is required" {:type :missing-queue-capacity})))
+  (when (nil? backpressure)
+    (throw (ex-info ":backpressure is required" {:type :missing-backpressure}))))
 
 (defn- emit-event!
   [channel opts event close?]
-  (let [{:keys [overflow-max overflow-mode queue last-progress start-drain! block-warning-emitted?]} opts]
-    (ensure-overflow-opts overflow-max overflow-mode)
+  (let [{:keys [queue-capacity backpressure queue last-progress start-drain! block-warning-emitted?]} opts]
+    (ensure-overflow-opts queue-capacity backpressure)
     (if-let [q @queue]
       ;; Queue exists - route to drain thread
       (do
@@ -30,7 +30,7 @@
           true)
 
         ;; Channel full, block mode
-        (= overflow-mode :block)
+        (= backpressure :block)
         (do
           (when (and block-warning-emitted?
                      (compare-and-set! block-warning-emitted? false true))
@@ -44,11 +44,11 @@
         ;; If drain init fails, reset queue and fall back to block mode.
         ;; Channel full, queue mode - create overflow queue
         :else
-        (let [new-q (java.util.concurrent.LinkedBlockingQueue. overflow-max)]
+        (let [new-q (java.util.concurrent.LinkedBlockingQueue. queue-capacity)]
           (if (compare-and-set! queue nil new-q)
             (try
               (log/warn "overflow queue created"
-                        {:overflow-max overflow-max})
+                        {:queue-capacity queue-capacity})
               (start-drain! new-q)
               (.put new-q {:event event :close? close?})
               true
@@ -70,7 +70,7 @@
 (defn- make-emitter
   "Create an emitter for delivering event maps to a channel."
   [channel opts]
-  (let [{:keys [overflow-max overflow-mode]} opts
+  (let [{:keys [queue-capacity backpressure]} opts
         queue (atom nil)
         last-progress (atom (System/nanoTime))
         block-warning-emitted? (atom false)
@@ -90,15 +90,15 @@
         emit! (fn [event close?]
                 (emit-event!
                  channel
-                 {:overflow-max overflow-max
-                  :overflow-mode overflow-mode
+                 {:queue-capacity queue-capacity
+                  :backpressure backpressure
                   :queue queue
                   :last-progress last-progress
                   :start-drain! start-drain!
                   :block-warning-emitted? block-warning-emitted?}
                  event
                  close?))]
-    (ensure-overflow-opts overflow-max overflow-mode)
+    (ensure-overflow-opts queue-capacity backpressure)
     {:last-progress last-progress
      :emit! emit!}))
 

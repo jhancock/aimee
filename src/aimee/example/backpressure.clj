@@ -59,14 +59,14 @@
   ;; Local SSE backpressure tests (no network required)
   ;; ---------------------------------------------------------------------------
 
-  ;; Example 1: Overflow queue mode (:overflow-mode :queue)
+  ;; Example 1: Overflow queue mode (:backpressure :queue)
   ;; Producer fills faster than consumer, queue buffers events.
   (def sse-data-1 (make-sse-sample 300))
   (def input-1 (java.io.ByteArrayInputStream. (.getBytes sse-data-1 "UTF-8")))
   (def ch-1 (async/chan 1))
   (def terminated-1? (atom false))
-  (def callbacks-1 (emitter/make-channel-callbacks ch-1 {:overflow-max 50
-                                                          :overflow-mode :queue
+  (def callbacks-1 (emitter/make-channel-callbacks ch-1 {:queue-capacity 50
+                                                          :backpressure :queue
                                                           :terminated? terminated-1?}))
   (def handlers-1 (chat-sse/make-stream-handlers
                    {:emit! (:emit! callbacks-1)
@@ -91,14 +91,14 @@
   @consumed-1
   @terminated-1?
 
-  ;; Example 2: Block mode immediate backpressure (:overflow-mode :block)
+  ;; Example 2: Block mode immediate backpressure (:backpressure :block)
   ;; No queue, producer blocks when channel full.
   (def sse-data-2 (make-sse-sample 150))
   (def input-2 (java.io.ByteArrayInputStream. (.getBytes sse-data-2 "UTF-8")))
   (def ch-2 (async/chan 1))
   (def terminated-2? (atom false))
-  (def callbacks-2 (emitter/make-channel-callbacks ch-2 {:overflow-max 50
-                                                          :overflow-mode :block
+  (def callbacks-2 (emitter/make-channel-callbacks ch-2 {:queue-capacity 50
+                                                          :backpressure :block
                                                           :terminated? terminated-2?}))
   (def handlers-2 (chat-sse/make-stream-handlers
                    {:emit! (:emit! callbacks-2)

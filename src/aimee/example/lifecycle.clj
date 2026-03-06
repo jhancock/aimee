@@ -40,7 +40,7 @@
   (def lifecycle-cb-complete
     (emitter/make-channel-callbacks
      lifecycle-ch-complete
-     {:overflow-max 10 :overflow-mode :queue}))
+      {:queue-capacity 10 :backpressure :queue}))
   ((:complete! lifecycle-cb-complete) {:content "done"})
   (def lifecycle-complete-event (async/<!! lifecycle-ch-complete))
   lifecycle-complete-event
@@ -52,7 +52,7 @@
   (def lifecycle-cb-error
     (emitter/make-channel-callbacks
      lifecycle-ch-error
-     {:overflow-max 10 :overflow-mode :queue}))
+      {:queue-capacity 10 :backpressure :queue}))
   ((:error! lifecycle-cb-error) (ex-info "simulated failure" {:type :simulated}))
   (def lifecycle-error-event (async/<!! lifecycle-ch-error))
   lifecycle-error-event
