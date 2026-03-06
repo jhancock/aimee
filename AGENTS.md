@@ -1,5 +1,13 @@
 # AI Assistant Guidelines
 
+## Git Operations
+
+**NEVER run git commands that modify state.** This includes:
+- `git commit`, `git push`, `git tag`, `git reset`, `git rebase`, etc.
+- Only the user may run these commands
+
+Safe read-only git commands are OK (e.g., `git status`, `git log`, `git diff`).
+
 ## Development Environment
 
 Use `clj-nrepl-eval` to evaluate Clojure code via the running nREPL server on port 7888.
