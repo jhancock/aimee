@@ -2,8 +2,8 @@
   (:require [clojure.tools.build.api :as b]
             [deps-deploy.deps-deploy :as deps-deploy]))
 
-(def lib 'jhancock/aimee)
-(def version "0.1.0-SNAPSHOT")
+(def lib 'net.clojars.jhancock/aimee)
+(def version "0.2.0")
 (def class-dir "target/classes")
 (def basis (b/create-basis {:project "deps.edn"}))
 
@@ -32,7 +32,8 @@
                            [:scm
                             [:url "https://github.com/jhancock/aimee"]
                             [:connection "scm:git:git://github.com/jhancock/aimee.git"]
-                            [:developerConnection "scm:git:ssh://git@github.com/jhancock/aimee.git"]]]})
+                            [:developerConnection "scm:git:ssh://git@github.com/jhancock/aimee.git"]
+                            [:tag (str "v" version)]]]})
   (b/jar {:class-dir class-dir
           :jar-file (format "target/%s-%s.jar" (name lib) version)}))
 

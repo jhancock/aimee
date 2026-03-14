@@ -1,25 +1,25 @@
 # aimee
 
-Aimee is a library for streaming and non-streaming OpenAI compatible Chat Completions over core.async channels. Aimee is intended to be highly robust and scalable. Depends on org.clojure/core.async 1.9.829-alpha2 to leverage latest JDK 21+ virtual thread behavior. Tested with OpenAI Chat Conpletion API.
+Aimee is a library for streaming (SSE) and non-streaming OpenAI compatible Chat Completions over core.async channels. Aimee is intended to be highly robust and scalable. Depends on org.clojure/core.async 1.9.829-alpha2 to leverage latest JDK 21+ virtual thread behavior. Tested with OpenAI Chat Conpletion API.
 
 ## Install
 
 ```edn
 {:deps
- {jhancock/aimee
-  {:git/url "https://github.com/jhancock/aimee.git"
-   :git/tag "v0.1.0"}}}
+ {net.clojars.jhancock/aimee {:mvn/version "0.2.0"}}}
 ```
 
 ## How It Works
 
-1. You create a `core.async` channel
-2. Pass it to `start-request!` with your request options. This creates a virtual thread to handle the HTTP request and result processing lifecycle.
-3. Events are written to your channel as the request progresses
+1. The caller creates a `core.async` channel
+2. Pass the channel to `start-request!` with your request options. This creates a virtual thread to handle the HTTP request and result processing lifecycle.
+3. Events are written to the channel as the request progresses. Events are a map {:event <event-type> :data <data-map>}. Events types are :chunk, :complete and :error. A :chunk event is an SSE Chat Completion "chunk". At the end of any stream or non-stream request there will be a :complete event except in the case of :error.
 4. Consume events from your channel (via `go-loop`, `<!!`, etc.)
 5. Channel closes after `:complete` or `:error`
 
-The channel is yours. You control its buffer size, how you consume from it. The library handles the chat completion request lifecycle, writes events to the channel, closes it when done and handles slow channel consumer overflow with backpressure options. Aimee provides helper functions such as `aimee.chat.ring/->ring-stream` to write SSE chunks to an HTTP streaming response. See [`aimee.example.chat-server`](src/aimee/example/chat_server.clj) for a complete working example.
+The channel is yours. You control its buffer size, how you consume from it. The library handles the chat completion request lifecycle, writes events to the channel, closes it when done and handles slow channel consumer overflow with backpressure options. Aimee provides helper functions such as `aimee.chat.ring/->ring-stream` to write SSE chunks to an HTTP streaming response. 
+
+See [`aimee.example.chat-server`](src/aimee/example/chat_server.clj) for a complete working example. This example uses the latest Jetty 12.x, virtual threads, SSE streaming response.
 
 ## Quick Start
 
@@ -80,7 +80,7 @@ Calling `:stop!` cancels the request and emits `:complete` with `:reason :stoppe
 - **`:backpressure`** — `:queue` — `:queue` or `:block`
 - **`:queue-capacity`** — `1000` — Capacity of overflow queue when :backpressure is :queue
 - **`:channel-idle-timeout-ms`** — `nil` — Abort if no progress for this duration. `nil` means aimee doesn't impose a timeout on channel consumption.
-- **`:http-timeout-ms`** — `nil` — HTTP request timeout. `nil` means the HTTP library possibly uses its default timeout.
+- **`:http-timeout-ms`** — `nil` — HTTP request timeout. `nil` means the HTTP library uses its default timeout.
 - **`:include-usage?`** — `false` — Include usage stats in streaming `:complete`
 - **`:on-parse-error`** — `:stop` — `:stop` emits error and closes; `:continue` logs and skips
 
@@ -254,3 +254,23 @@ or test with curl
 ```sh
 curl -X POST http://localhost:8080/chat -H 'Content-Type: application/json' -d '{\"messages\":[{\"role\":\"user\",\"text\":\"hello\"}]}'
 ```
+
+### Deploy (author notes)
+
+0. Update version in build.clj and README.md
+1. Create a deploy token in Clojars: https://clojars.org/tokens
+2. In your terminal:
+
+  export CLOJARS_USERNAME=jhancock
+  export CLOJARS_PASSWORD='YOUR_DEPLOY_TOKEN'
+
+3. Publish:
+
+  clojure -T:build deploy
+
+On success, commit and tag:
+
+  git commit -m "Release 0.2.0"
+  git tag -a v0.2.0 -m "Release v0.2.0"
+  git push origin "$(git branch --show-current)"
+  git push origin v0.2.0
