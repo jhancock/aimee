@@ -1,6 +1,6 @@
 # aimee
 
-Aimee is a library for streaming (SSE) and non-streaming OpenAI compatible Chat Completions over core.async channels. Aimee is intended to be highly robust and scalable. Depends on org.clojure/core.async 1.9.847-alpha3 to leverage latest JDK 21+ virtual thread behavior. Tested with OpenAI Chat Conpletion API.
+Aimee is a library for streaming (SSE) and non-streaming OpenAI compatible Chat Completions over core.async channels. Aimee is intended to be robust and scalable. Depends on org.clojure/core.async 1.9.847-alpha3 to leverage latest JDK 21+ virtual thread behavior. Tested with OpenAI Chat Conpletion API.
 
 ## Install
 
