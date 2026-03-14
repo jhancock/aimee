@@ -3,7 +3,7 @@
 .calva/output-window/
 .calva/repl.calva-repl
 .classpath
-.clj-kondo/.cache
+.clj-kondo/
 .lsp/.cache
 .lsp/sqlite.db
 .crush
