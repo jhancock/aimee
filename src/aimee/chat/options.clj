@@ -73,7 +73,17 @@
    ;; Maximum data lines to accept in a single SSE event before forcing
    ;; a flush. Protects against unbounded memory growth from malformed
    ;; or malicious input.
-   :max-data-lines 1000})
+   :max-data-lines 1000
+
+   ;; Map of additional parameters merged directly into the API request body.
+   ;; Use wire-format key names (snake_case). Merged after all library-managed
+   ;; fields, so API params can override defaults. Nil by default.
+   ;;
+   ;; Examples:
+   ;;   {:reasoning {:effort "high"}}
+   ;;   {:temperature 0.7 :max_tokens 4096}
+   ;;   {:response_format {:type "json_object"} :seed 42}
+   :api-params nil})
 
 (defn- non-blank-string?
   [value]
@@ -137,6 +147,7 @@
 
 (s/def ::choices-n #{1})
 (s/def ::max-data-lines (s/nilable pos-int?))
+(s/def ::api-params (s/nilable map?))
 
 (s/def ::opts
   (s/keys :req-un [::channel ::url ::model ::messages]
@@ -150,9 +161,10 @@
                    ::channel-idle-timeout-ms
                    ::http-timeout-ms
                    ::headers
-                   ::include-usage?
+                    ::include-usage?
                    ::choices-n
-                   ::max-data-lines]))
+                   ::max-data-lines
+                   ::api-params]))
 
 (defn validate-opts!
   "Validate and normalize required options. Throws ex-info if invalid.

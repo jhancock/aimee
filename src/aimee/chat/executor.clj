@@ -12,12 +12,13 @@
 
 (defn- build-body
   "Build the request body for chat completion."
-  [{:keys [model messages stream? choices-n include-usage?]}]
+  [{:keys [model messages stream? choices-n include-usage? api-params]}]
   (json/generate-string
-   (cond-> {:model model
-            :messages messages
-            :stream stream?
-            :n choices-n}
+   (cond-> (merge {:model model
+                   :messages messages
+                   :stream stream?
+                   :n choices-n}
+                  api-params)
      (and stream? include-usage?)
      (assoc :stream_options {:include_usage true}))))
 

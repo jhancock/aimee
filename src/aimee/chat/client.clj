@@ -43,9 +43,11 @@
   - :channel-idle-timeout-ms - Abort if no progress events emitted for this duration
   - :http-timeout-ms - HTTP request timeout in milliseconds
 
-  Other opts:
-  - :stream? (default false) - Enable streaming response
-  - :headers - Additional HTTP headers
+   Other opts:
+   - :stream? (default false) - Enable streaming response
+   - :headers - Additional HTTP headers
+   - :api-params (default nil) - Map merged directly into the API request body
+     (wire-format keys). E.g. {:reasoning {:effort "high"} :temperature 0.7}
 
   Returns map with:
   - :stop! - function to cancel the request
